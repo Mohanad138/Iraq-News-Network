@@ -34,7 +34,7 @@ CHANNELS = {
     -1009001073232: {
         "name": "العراق الآن",
         "target": "@IQNowNews",
-        "mode": "copy",
+        "mode": "rephrase_ar", # تم التغيير إلى إعادة صياغة
         "source_username": "@RN24_IQ",
         "add_link": True,
         "link": "https://t.me/IQNowNews",
@@ -43,12 +43,10 @@ CHANNELS = {
     -1001530089992: {
         "name": "مكتبة الطالب العراقي",
         "target": "@TalibLib",
-        "mode": "copy",
-        "source_username": "@eduiq23",
+        "mode": "rephrase_ar", # تم التغيير إلى إعادة صياغة
+        "source_username": "@v999v", # المصدر الجديد
         "add_link": True,
         "link": "https://t.me/TalibLib",
-        "topic_filter": "أخبار ومعلومات تخص الطلبة والدراسة والتعليم فقط.",
-        "link_after_share_phrase": True,
         "fb_page_id": PAGE_ID_STUDENT,
     },
 }
@@ -111,7 +109,7 @@ def call_groq(prompt, max_retries=3):
 
 def call_rephrase(text):
     prompt = f"""أنت محرر صحفي عراقي. أعد صياغة النص بأسلوب صحفي احترافي.
-تجاهل الروابط. إذا كان إعلاناً اجعل should_post=false.
+تجاهل الروابط. إذا كان إعلاناً تجارياً اجعل should_post=false، عدا ذلك انشره (true).
 النص:
 {text}
 أعد النتيجة بصيغة JSON فقط: {{"should_post": true/false, "text": "النص المعاد صياغته"}}"""
@@ -126,26 +124,6 @@ def call_rephrase(text):
         print(f"❌ خطأ الصياغة: {e}")
         return {"should_post": False, "text": ""}
 
-def check_is_ad(text):
-    prompt = f'حدد إذا كان النص إعلاناً (is_ad=true) أو خبراً (false).\nالنص: {text}\nJSON: {{"is_ad": true/false}}'
-    try:
-        res_raw = call_groq(prompt)
-        if res_raw.startswith("```"):
-            res_raw = res_raw.strip("`").strip()
-            if res_raw.lower().startswith("json"): res_raw = res_raw[4:].strip()
-        return bool(json.loads(res_raw).get("is_ad", False))
-    except Exception: return False
-
-def check_is_relevant_topic(text, topic_description):
-    prompt = f'حدد إذا كان يتعلق بالموضوع (is_relevant=true) أو لا (false).\nالموضوع: {topic_description}\nالنص: {text}\nJSON: {{"is_relevant": true/false}}'
-    try:
-        res_raw = call_groq(prompt)
-        if res_raw.startswith("```"):
-            res_raw = res_raw.strip("`").strip()
-            if res_raw.lower().startswith("json"): res_raw = res_raw[4:].strip()
-        return bool(json.loads(res_raw).get("is_relevant", False))
-    except Exception: return True
-
 SHARE_PHRASE_RE = re.compile(r'شارك\s+(القناة|المنشور)\s+مع\s+[اأ]?صدقائ?ك?', re.IGNORECASE)
 def insert_link_after_share_phrase(text, link_text):
     match = SHARE_PHRASE_RE.search(text)
@@ -155,21 +133,12 @@ def insert_link_after_share_phrase(text, link_text):
     return text[:newline_idx] + f"\n{link_text}" + text[newline_idx:]
 
 async def apply_processing(config, text):
-    mode = config["mode"]
-    if mode == "copy":
-        if check_is_ad(text): return False, text
-        if config.get("topic_filter") and not check_is_relevant_topic(text, config["topic_filter"]): return False, text
-        return True, text
-    elif mode == "rephrase_ar":
-        res = call_rephrase(text)
-        return res["should_post"], res["text"]
-    return True, text
+    res = call_rephrase(text)
+    return res["should_post"], res["text"]
 
-# ==== دالة النشر على فيسبوك (مع التعليق) ====
 def post_to_facebook(page_id, token, text, image_data=None):
     if not page_id or not token: return
     try:
-        # 1. النشر الأساسي
         base_url = f"{GRAPH}/{page_id}"
         if image_data:
             res = requests.post(f"{base_url}/photos", data={"access_token": token, "message": text}, files={"source": ("image.jpg", image_data)}, timeout=30)
@@ -184,14 +153,14 @@ def post_to_facebook(page_id, token, text, image_data=None):
         post_id = res_data.get("post_id") or res_data.get("id")
         print(f"✅ نُشر على فيسبوك ({page_id})")
         
-        # 2. إضافة التعليق التلقائي
-        comment_text = "تابعنا على التلكرام 👇\nhttps://t.me/KirkukNow24H" if page_id == PAGE_ID_KIRKUK else ("https://t.me/IQNowNews" if page_id == PAGE_ID_IRAQ else "https://t.me/TalibLib")
+        comment_text = ""
         if page_id == PAGE_ID_KIRKUK: comment_text = "تابعنا على التلكرام 👇\nhttps://t.me/KirkukNow24H"
         elif page_id == PAGE_ID_IRAQ: comment_text = "تابعنا على التلكرام 👇\nhttps://t.me/IQNowNews"
         elif page_id == PAGE_ID_STUDENT: comment_text = "تابعنا على التلكرام 👇\nhttps://t.me/TalibLib"
         
-        requests.post(f"{GRAPH}/{post_id}/comments", data={"access_token": token, "message": comment_text}, timeout=30)
-        print(f"✅ تمت إضافة تعليق على فيسبوك")
+        if comment_text:
+            requests.post(f"{GRAPH}/{post_id}/comments", data={"access_token": token, "message": comment_text}, timeout=30)
+            print(f"✅ تمت إضافة تعليق على فيسبوك")
     except Exception as e:
         print(f"❌ فشل النشر على فيسبوك: {e}")
 
@@ -220,7 +189,6 @@ async def process_batch(source_id, messages):
         try: media_data = await client.download_media(media_msgs[0], file=bytes)
         except Exception: pass
 
-    # النشر على تيليجرام
     try:
         if media_data:
             await client.send_file(config["target"], media_data, caption=final_text, parse_mode="html")
@@ -230,7 +198,6 @@ async def process_batch(source_id, messages):
             print(f"✅ نُشر (نص) — {config['name']} [تيليجرام]")
     except Exception as e: print(f"❌ خطأ تيليجرام: {e}")
 
-    # النشر على فيسبوك
     if FB_TOKEN and config.get("fb_page_id"):
         post_to_facebook(config["fb_page_id"], FB_TOKEN, final_text, media_data)
 
