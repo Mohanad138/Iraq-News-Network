@@ -187,12 +187,17 @@ async def catch_up_channel(source_id):
     entity_ref = config.get("source_username") or source_id
     key = str(source_id)
     last_id = state.get(key, 0)
+    
+    # السر هنا: إذا كان last_id = 0، نطلب آخر 5 رسائل فقط
+    limit = 5 if last_id == 0 else 100
+    
     if last_id == 0:
         latest = await client.get_messages(entity_ref, limit=1)
         if latest: last_id = max(latest[0].id - 5, 0)
         state[key] = last_id
         save_state(state)
-    messages = await client.get_messages(entity_ref, min_id=last_id, limit=100)
+        
+    messages = await client.get_messages(entity_ref, min_id=last_id, limit=limit)
     if not messages: return
     messages = list(reversed(messages))
     for msg in messages:
@@ -210,15 +215,12 @@ async def catch_up_channel(source_id):
 async def main():
     await client.start()
     
-    # 🚀 السر هنا: تشغيل القنوات الثلاث في نفس الوقت (Parallel)
+    # تشغيل القنوات الثلاث في نفس الوقت
     tasks = []
-    for source_id, cfg in CHANNELS.items():
+    for source_id in CHANNELS:
         tasks.append(catch_up_channel(source_id))
         
-    try:
-        await asyncio.gather(*tasks)
-    except Exception as e:
-        print(f"❌ خطأ أثناء التشغيل المتوازي: {e}")
+    await asyncio.gather(*tasks)
         
     await client.disconnect()
     commit_state()
