@@ -10,6 +10,7 @@ TG_API_HASH = os.getenv("TG_API_HASH")
 TG_SESSION = os.getenv("TG_SESSION")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
+# إعدادات فيسبوك
 FB_TOKEN = os.getenv("FB_TOKEN")
 PAGE_ID_KIRKUK = os.getenv("PAGE_ID_KIRKUK")
 PAGE_ID_STUDENT = os.getenv("PAGE_ID_STUDENT")
@@ -20,37 +21,42 @@ GRAPH = "https://graph.facebook.com/v21.0"
 STATE_FILE = "relay_state.json"
 os.makedirs("downloads", exist_ok=True)
 
+# اجعلها True أول مرة لينشر آخر 5 منشورات، ثم غيرها إلى False
+FORCE_POST_LAST_5 = True 
+
 CHANNELS = {
     -1001565832101: {
-        "name": "كركوك الآن", "target": "@KirkukNow24H", "mode": "rephrase_ar",
-        "source_username": "@kirkukdiary", "add_link": True,
-        "link": "https://t.me/KirkukNow24H", "fb_page_id": PAGE_ID_KIRKUK,
+        "name": "كركوك الآن", "target": None, "mode": "rephrase_ar",
+        "source_username": "@kirkukdiary", "add_link": False,
+        "fb_page_id": PAGE_ID_KIRKUK,
     },
     -1009001073232: {
-        "name": "العراق الآن", "target": "@IQNowNews", "mode": "rephrase_ar",
-        "source_username": "@RN24_IQ", "add_link": True,
-        "link": "https://t.me/IQNowNews", "fb_page_id": PAGE_ID_IRAQ,
+        "name": "العراق الآن", "target": None, "mode": "rephrase_ar",
+        "source_username": "@RN24_IQ", "add_link": False,
+        "fb_page_id": PAGE_ID_IRAQ,
     },
     -1001530089992: {
-        "name": "مكتبة الطالب العراقي", "target": "@TalibLib", "mode": "rephrase_ar",
-        "source_username": "@v999v", "add_link": True,
-        "link": "https://t.me/TalibLib", "fb_page_id": PAGE_ID_STUDENT,
+        "name": "مكتبة الطالب العراقي", "target": None, "mode": "rephrase_ar",
+        "source_username": "@v999v", "add_link": False,
+        "fb_page_id": PAGE_ID_STUDENT,
     },
 }
 
 client = TelegramClient(StringSession(TG_SESSION), TG_API_ID, TG_API_HASH)
 
-def load_state():
+# إذا كان FORCE_POST_LAST_5 مفعل، نمسح الحالة المحلية لتبدأ من جديد
+if FORCE_POST_LAST_5:
+    state = {}
+else:
     if os.path.exists(STATE_FILE):
         try:
-            with open(STATE_FILE, "r", encoding="utf-8") as f: return json.load(f)
-        except Exception: return {}
-    return {}
+            with open(STATE_FILE, "r", encoding="utf-8") as f: state = json.load(f)
+        except Exception: state = {}
+    else:
+        state = {}
 
 def save_state(state):
     with open(STATE_FILE, "w", encoding="utf-8") as f: json.dump(state, f, ensure_ascii=False, indent=2)
-
-state = load_state()
 
 def is_duplicate_content(source_id, text):
     if not text or not text.strip(): return False
@@ -111,16 +117,10 @@ def call_rephrase(text):
         print(f"❌ خطأ الصياغة: {e}")
         return {"should_post": False, "text": ""}
 
-SHARE_PHRASE_RE = re.compile(r'شارك\s+(القناة|المنشور)\s+مع\s+[اأ]?صدقائ?ك?', re.IGNORECASE)
-def insert_link_after_share_phrase(text, link_text):
-    match = SHARE_PHRASE_RE.search(text)
-    if not match: return None
-    newline_idx = text.find('\n', match.end())
-    if newline_idx == -1: return text.rstrip() + f"\n{link_text}"
-    return text[:newline_idx] + f"\n{link_text}" + text[newline_idx:]
-
 def post_to_facebook(page_id, token, text, image_data=None):
-    if not page_id or not token: return
+    if not page_id or not token: 
+        print("❌ خطأ: معرف الصفحة أو التوكن غير موجود!")
+        return
     try:
         base_url = f"{GRAPH}/{page_id}"
         if image_data:
@@ -158,11 +158,6 @@ async def process_batch(source_id, messages):
     if not res["should_post"] or not res["text"]: return
     final_text = res["text"]
     record_published_text(source_id, raw_text)
-    
-    if config.get("add_link") and config.get("link"):
-        inserted = insert_link_after_share_phrase(final_text, config["link"])
-        if inserted is not None: final_text = inserted
-        else: final_text = f"{final_text}\n\n{config['link']}"
         
     media_msgs = [m for m in messages if m.media and not m.video]
     media_data = None
@@ -170,15 +165,7 @@ async def process_batch(source_id, messages):
         try: media_data = await client.download_media(media_msgs[0], file=bytes)
         except Exception: pass
 
-    try:
-        if media_data:
-            await client.send_file(config["target"], media_data, caption=final_text, parse_mode="html")
-            print(f"✅ نُشر (وسائط) — {config['name']} [تيليجرام]")
-        else:
-            await client.send_message(config["target"], final_text, parse_mode="html", link_preview=False)
-            print(f"✅ نُشر (نص) — {config['name']} [تيليجرام]")
-    except Exception as e: print(f"❌ خطأ تيليجرام: {e}")
-
+    # تم إلغاء النشر على تيليجرام، النشر على فيسبوك فقط
     if FB_TOKEN and config.get("fb_page_id"):
         post_to_facebook(config["fb_page_id"], FB_TOKEN, final_text, media_data)
 
@@ -188,8 +175,8 @@ async def catch_up_channel(source_id):
     key = str(source_id)
     last_id = state.get(key, 0)
     
-    # السر هنا: إذا كان last_id = 0، نطلب آخر 5 رسائل فقط
-    limit = 5 if last_id == 0 else 100
+    # السر هنا: إذا كنا في وضع النشر الأول (FORCE_POST_LAST_5) أو last_id=0، نطلب آخر 5 رسائل فقط
+    limit = 5 if (FORCE_POST_LAST_5 or last_id == 0) else 100
     
     if last_id == 0:
         latest = await client.get_messages(entity_ref, limit=1)
@@ -215,7 +202,6 @@ async def catch_up_channel(source_id):
 async def main():
     await client.start()
     
-    # تشغيل القنوات الثلاث في نفس الوقت
     tasks = []
     for source_id in CHANNELS:
         tasks.append(catch_up_channel(source_id))
