@@ -1,4 +1,4 @@
-name: Unified News Relay
+name: Iraq News Network
 on:
   schedule:
     - cron: "*/10 * * * *"
@@ -31,4 +31,8 @@ jobs:
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           TG_SESSION: ${{ secrets.TG_SESSION }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          FB_TOKEN: ${{ secrets.FB_TOKEN }}
+          PAGE_ID_KIRKUK: ${{ secrets.PAGE_ID_KIRKUK }}
+          PAGE_ID_STUDENT: ${{ secrets.PAGE_ID_STUDENT }}
+          PAGE_ID_IRAQ: ${{ secrets.PAGE_ID_IRAQ }}
         run: python main.py
