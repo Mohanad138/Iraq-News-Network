@@ -2,7 +2,7 @@
 import os, re, json, time, asyncio, subprocess, difflib
 from telethon import TelegramClient
 from telethon.sessions import StringSession
-from telethon.tl.types import (MessageEntityTextUrl, MessageMediaPhoto, MessageMediaDocument, MessageMediaWebPage)
+from telethon.tl.types import (MessageMediaPhoto, MessageMediaDocument, MessageMediaWebPage)
 import requests
 
 TG_API_ID = int(os.getenv("TG_API_ID"))
@@ -10,12 +10,18 @@ TG_API_HASH = os.getenv("TG_API_HASH")
 TG_SESSION = os.getenv("TG_SESSION")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
+# إعدادات فيسبوك
+FB_TOKEN = os.getenv("FB_TOKEN")
+PAGE_ID_KIRKUK = os.getenv("PAGE_ID_KIRKUK")
+PAGE_ID_STUDENT = os.getenv("PAGE_ID_STUDENT")
+PAGE_ID_IRAQ = os.getenv("PAGE_ID_IRAQ")
+
 GROQ_MODEL = "llama-3.3-70b-versatile"
+GRAPH = "https://graph.facebook.com/v21.0"
 STATE_FILE = "relay_state.json"
 os.makedirs("downloads", exist_ok=True)
 
 CHANNELS = {
-    # 1. كركوك الآن
     -1001565832101: {
         "name": "كركوك الآن",
         "target": "@KirkukNow24H",
@@ -23,8 +29,8 @@ CHANNELS = {
         "source_username": "@kirkukdiary",
         "add_link": True,
         "link": "https://t.me/KirkukNow24H",
+        "fb_page_id": PAGE_ID_KIRKUK,
     },
-    # 2. العراق الآن
     -1009001073232: {
         "name": "العراق الآن",
         "target": "@IQNowNews",
@@ -32,8 +38,8 @@ CHANNELS = {
         "source_username": "@RN24_IQ",
         "add_link": True,
         "link": "https://t.me/IQNowNews",
+        "fb_page_id": PAGE_ID_IRAQ,
     },
-    # 3. مكتبة الطالب العراقي
     -1001530089992: {
         "name": "مكتبة الطالب العراقي",
         "target": "@TalibLib",
@@ -43,6 +49,7 @@ CHANNELS = {
         "link": "https://t.me/TalibLib",
         "topic_filter": "أخبار ومعلومات تخص الطلبة والدراسة والتعليم فقط.",
         "link_after_share_phrase": True,
+        "fb_page_id": PAGE_ID_STUDENT,
     },
 }
 
@@ -158,6 +165,36 @@ async def apply_processing(config, text):
         return res["should_post"], res["text"]
     return True, text
 
+# ==== دالة النشر على فيسبوك (مع التعليق) ====
+def post_to_facebook(page_id, token, text, image_data=None):
+    if not page_id or not token: return
+    try:
+        # 1. النشر الأساسي
+        base_url = f"{GRAPH}/{page_id}"
+        if image_data:
+            res = requests.post(f"{base_url}/photos", data={"access_token": token, "message": text}, files={"source": ("image.jpg", image_data)}, timeout=30)
+        else:
+            res = requests.post(f"{base_url}/feed", data={"access_token": token, "message": text}, timeout=30)
+        
+        res_data = res.json()
+        if "error" in res_data:
+            print(f"❌ خطأ فيسبوك: {res_data['error']['message']}")
+            return
+            
+        post_id = res_data.get("post_id") or res_data.get("id")
+        print(f"✅ نُشر على فيسبوك ({page_id})")
+        
+        # 2. إضافة التعليق التلقائي
+        comment_text = "تابعنا على التلكرام 👇\nhttps://t.me/KirkukNow24H" if page_id == PAGE_ID_KIRKUK else ("https://t.me/IQNowNews" if page_id == PAGE_ID_IRAQ else "https://t.me/TalibLib")
+        if page_id == PAGE_ID_KIRKUK: comment_text = "تابعنا على التلكرام 👇\nhttps://t.me/KirkukNow24H"
+        elif page_id == PAGE_ID_IRAQ: comment_text = "تابعنا على التلكرام 👇\nhttps://t.me/IQNowNews"
+        elif page_id == PAGE_ID_STUDENT: comment_text = "تابعنا على التلكرام 👇\nhttps://t.me/TalibLib"
+        
+        requests.post(f"{GRAPH}/{post_id}/comments", data={"access_token": token, "message": comment_text}, timeout=30)
+        print(f"✅ تمت إضافة تعليق على فيسبوك")
+    except Exception as e:
+        print(f"❌ فشل النشر على فيسبوك: {e}")
+
 async def process_batch(source_id, messages):
     config = CHANNELS.get(source_id)
     if not config: return
@@ -178,16 +215,24 @@ async def process_batch(source_id, messages):
         else: final_text = f"{final_text}\n\n{config['link']}"
         
     media_msgs = [m for m in messages if m.media and not m.video]
+    media_data = None
+    if media_msgs:
+        try: media_data = await client.download_media(media_msgs[0], file=bytes)
+        except Exception: pass
+
+    # النشر على تيليجرام
     try:
-        if media_msgs:
-            to_send = media_msgs[0].photo if isinstance(media_msgs[0].media, MessageMediaWebPage) else media_msgs[0].media
-            if to_send:
-                await client.send_file(config["target"], to_send, caption=final_text, parse_mode="html")
-                print(f"✅ نُشر (وسائط) — {config['name']}")
-                return
-        await client.send_message(config["target"], final_text, parse_mode="html", link_preview=False)
-        print(f"✅ نُشر (نص) — {config['name']}")
-    except Exception as e: print(f"❌ خطأ بالنشر — {config['name']}: {e}")
+        if media_data:
+            await client.send_file(config["target"], media_data, caption=final_text, parse_mode="html")
+            print(f"✅ نُشر (وسائط) — {config['name']} [تيليجرام]")
+        else:
+            await client.send_message(config["target"], final_text, parse_mode="html", link_preview=False)
+            print(f"✅ نُشر (نص) — {config['name']} [تيليجرام]")
+    except Exception as e: print(f"❌ خطأ تيليجرام: {e}")
+
+    # النشر على فيسبوك
+    if FB_TOKEN and config.get("fb_page_id"):
+        post_to_facebook(config["fb_page_id"], FB_TOKEN, final_text, media_data)
 
 async def catch_up_channel(source_id):
     config = CHANNELS.get(source_id, {})
@@ -217,7 +262,6 @@ async def catch_up_channel(source_id):
 async def main():
     await client.start()
     for source_id, cfg in CHANNELS.items():
-        print(f"⏳ فحص — {cfg['name']}")
         try: await catch_up_channel(source_id)
         except Exception as e: print(f"❌ فشل {cfg['name']}: {e}")
         commit_state()
