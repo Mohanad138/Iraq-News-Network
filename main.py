@@ -10,7 +10,6 @@ TG_API_HASH = os.getenv("TG_API_HASH")
 TG_SESSION = os.getenv("TG_SESSION")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# إعدادات فيسبوك
 FB_TOKEN = os.getenv("FB_TOKEN")
 PAGE_ID_KIRKUK = os.getenv("PAGE_ID_KIRKUK")
 PAGE_ID_STUDENT = os.getenv("PAGE_ID_STUDENT")
@@ -23,31 +22,19 @@ os.makedirs("downloads", exist_ok=True)
 
 CHANNELS = {
     -1001565832101: {
-        "name": "كركوك الآن",
-        "target": "@KirkukNow24H",
-        "mode": "rephrase_ar",
-        "source_username": "@kirkukdiary",
-        "add_link": True,
-        "link": "https://t.me/KirkukNow24H",
-        "fb_page_id": PAGE_ID_KIRKUK,
+        "name": "كركوك الآن", "target": "@KirkukNow24H", "mode": "rephrase_ar",
+        "source_username": "@kirkukdiary", "add_link": True,
+        "link": "https://t.me/KirkukNow24H", "fb_page_id": PAGE_ID_KIRKUK,
     },
     -1009001073232: {
-        "name": "العراق الآن",
-        "target": "@IQNowNews",
-        "mode": "rephrase_ar", # تم التغيير إلى إعادة صياغة
-        "source_username": "@RN24_IQ",
-        "add_link": True,
-        "link": "https://t.me/IQNowNews",
-        "fb_page_id": PAGE_ID_IRAQ,
+        "name": "العراق الآن", "target": "@IQNowNews", "mode": "rephrase_ar",
+        "source_username": "@RN24_IQ", "add_link": True,
+        "link": "https://t.me/IQNowNews", "fb_page_id": PAGE_ID_IRAQ,
     },
     -1001530089992: {
-        "name": "مكتبة الطالب العراقي",
-        "target": "@TalibLib",
-        "mode": "rephrase_ar", # تم التغيير إلى إعادة صياغة
-        "source_username": "@v999v", # المصدر الجديد
-        "add_link": True,
-        "link": "https://t.me/TalibLib",
-        "fb_page_id": PAGE_ID_STUDENT,
+        "name": "مكتبة الطالب العراقي", "target": "@TalibLib", "mode": "rephrase_ar",
+        "source_username": "@v999v", "add_link": True,
+        "link": "https://t.me/TalibLib", "fb_page_id": PAGE_ID_STUDENT,
     },
 }
 
@@ -132,10 +119,6 @@ def insert_link_after_share_phrase(text, link_text):
     if newline_idx == -1: return text.rstrip() + f"\n{link_text}"
     return text[:newline_idx] + f"\n{link_text}" + text[newline_idx:]
 
-async def apply_processing(config, text):
-    res = call_rephrase(text)
-    return res["should_post"], res["text"]
-
 def post_to_facebook(page_id, token, text, image_data=None):
     if not page_id or not token: return
     try:
@@ -171,15 +154,13 @@ async def process_batch(source_id, messages):
     if not raw_text: return
     if is_duplicate_content(source_id, raw_text): return
     
-    should_post, final_text = await apply_processing(config, raw_text)
-    if not should_post or not final_text: return
-    
+    res = call_rephrase(raw_text)
+    if not res["should_post"] or not res["text"]: return
+    final_text = res["text"]
     record_published_text(source_id, raw_text)
     
     if config.get("add_link") and config.get("link"):
-        inserted = None
-        if config.get("link_after_share_phrase"):
-            inserted = insert_link_after_share_phrase(final_text, config["link"])
+        inserted = insert_link_after_share_phrase(final_text, config["link"])
         if inserted is not None: final_text = inserted
         else: final_text = f"{final_text}\n\n{config['link']}"
         
@@ -228,10 +209,17 @@ async def catch_up_channel(source_id):
 
 async def main():
     await client.start()
+    
+    # 🚀 السر هنا: تشغيل القنوات الثلاث في نفس الوقت (Parallel)
+    tasks = []
     for source_id, cfg in CHANNELS.items():
-        try: await catch_up_channel(source_id)
-        except Exception as e: print(f"❌ فشل {cfg['name']}: {e}")
-        commit_state()
+        tasks.append(catch_up_channel(source_id))
+        
+    try:
+        await asyncio.gather(*tasks)
+    except Exception as e:
+        print(f"❌ خطأ أثناء التشغيل المتوازي: {e}")
+        
     await client.disconnect()
     commit_state()
 
