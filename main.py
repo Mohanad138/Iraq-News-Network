@@ -16,7 +16,6 @@ STATE_FILE = "relay_state.json"
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# 🛑 تم إيقاف وضع التجربة (سيعمل البوت بشكل طبيعي ولن ينشر الإعلانات)
 TEST_MODE = False 
 
 FB_TOKEN_KIRKUK = os.getenv("FB_TOKEN_KIRKUK")
@@ -167,7 +166,6 @@ def clean_text(text, source_username=None):
 
 def contains_click_here_phrase(text): return bool(re.search(r'اضغط\s*هنا.{0,15}(للمشاهدة|لمشاهدة|مشاهدة)', text)) if text else False
 
-# 🛡️ فلتر برمجي صارم (لن يمر أي إعلان حتى لو حاول الذكاء الاصطناعي قبوله)
 def is_hardcoded_ad(text):
     if not text: return False
     ad_keywords = [
@@ -217,17 +215,18 @@ async def apply_processing(config, text):
         print(f"❌ خطأ المعالجة: {e}")
         return {"should_post": False, "text": ""}
 
-def post_to_facebook(page_id, token, text, media_data=None, is_video=False):
+# 🚀 تسريع الرفع: استخدام دالة متزامنة ولكن نستدعيها بطريقة لا توقف باقي القنوات
+def _sync_post_to_facebook(page_id, token, text, media_data=None, is_video=False):
     if not page_id or not token: return
     try:
         base_url = f"{GRAPH}/{page_id}"
         if media_data:
             if is_video:
-                res = requests.post(f"{base_url}/videos", data={"access_token": token, "description": text}, files={"source": ("video.mp4", media_data)}, timeout=120)
+                res = requests.post(f"{base_url}/videos", data={"access_token": token, "description": text}, files={"source": ("video.mp4", media_data)}, timeout=90) # تقليل الوقت
             else:
-                res = requests.post(f"{base_url}/photos", data={"access_token": token, "message": text}, files={"source": ("image.jpg", media_data)}, timeout=60)
+                res = requests.post(f"{base_url}/photos", data={"access_token": token, "message": text}, files={"source": ("image.jpg", media_data)}, timeout=45)
         else:
-            res = requests.post(f"{base_url}/feed", data={"access_token": token, "message": text}, timeout=30)
+            res = requests.post(f"{base_url}/feed", data={"access_token": token, "message": text}, timeout=20)
         
         res_data = res.json()
         if "error" in res_data:
@@ -243,9 +242,13 @@ def post_to_facebook(page_id, token, text, media_data=None, is_video=False):
         elif page_id == PAGE_ID_STUDENT: comment_text = "تابعنا على التلكرام 👇\nhttps://t.me/TalibLib"
         
         if comment_text:
-            requests.post(f"{GRAPH}/{post_id}/comments", data={"access_token": token, "message": comment_text}, timeout=30)
+            requests.post(f"{GRAPH}/{post_id}/comments", data={"access_token": token, "message": comment_text}, timeout=20)
     except Exception as e:
         print(f"❌ فشل النشر على فيسبوك: {e}")
+
+async def post_to_facebook(page_id, token, text, media_data=None, is_video=False):
+    # 🚀 استخدام asyncio.to_thread لمنع إيقاف باقي القنوات أثناء الرفع
+    await asyncio.to_thread(_sync_post_to_facebook, page_id, token, text, media_data, is_video)
 
 async def process_batch(source_id, messages):
     config = CHANNELS.get(source_id)
@@ -256,7 +259,6 @@ async def process_batch(source_id, messages):
     
     if contains_click_here_phrase(raw_text): return
     
-    # 1. الفحص البرمجي الصارم للإعلانات
     if is_hardcoded_ad(raw_text):
         print(f"⏭️ تجاهل إعلان تجاري (فلتر برمجي) — {config['name']}")
         return
@@ -269,7 +271,6 @@ async def process_batch(source_id, messages):
     
     if is_duplicate_content(source_id, cleaned): return
     
-    # 2. فحص الذكاء الاصطناعي
     res = await apply_processing(config, cleaned)
     should_post = res.get("should_post", True)
     final_text = res.get("text", cleaned)
@@ -298,7 +299,7 @@ async def process_batch(source_id, messages):
     if not final_text.strip() and not media_data: return
 
     if config.get("fb_token") and config.get("fb_page_id"):
-        post_to_facebook(config["fb_page_id"], config["fb_token"], final_text, media_data, is_video)
+        await post_to_facebook(config["fb_page_id"], config["fb_token"], final_text, media_data, is_video)
 
 async def catch_up_channel(source_id):
     config = CHANNELS.get(source_id, {})
