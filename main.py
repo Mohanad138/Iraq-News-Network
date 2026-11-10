@@ -16,10 +16,9 @@ STATE_FILE = "relay_state.json"
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# ⚠️ اجعلها True لكي ينشر آخر 5 منشورات (وضع التجربة)، وبعدها أرجعها False
-TEST_MODE = True 
+# 🛑 تم إيقاف وضع التجربة (سيعمل البوت بشكل طبيعي ولن ينشر الإعلانات)
+TEST_MODE = False 
 
-# إعدادات فيسبوك (تُقرأ من الأسرار في GitHub)
 FB_TOKEN_KIRKUK = os.getenv("FB_TOKEN_KIRKUK")
 FB_TOKEN_IRAQ = os.getenv("FB_TOKEN_IRAQ")
 FB_TOKEN_STUDENT = os.getenv("FB_TOKEN_STUDENT")
@@ -35,8 +34,8 @@ CHANNELS = {
         "fb_page_id": PAGE_ID_KIRKUK, 
         "fb_token": FB_TOKEN_KIRKUK,
         "prompt": """أنت محرر صحفي عراقي. أعد صياغة النص بأسلوب صحفي. 
-- انشر أي خبر محلي أو عام (اجعل should_post=true). 
-- اجعل should_post=false فقط إذا كان إعلاناً تجارياً صريحاً جداً (بيع منتجات، عروض أسعار).
+- انشر الأخبار المحلية والعامة فقط.
+- **ممنوع النشر (اجعل should_post=false) لأي إعلان تجاري، بيع، اشتراك، طلب مراسلة معرف، أو عروض أسعار.**
 - إذا كان النص طويلاً جداً وبلا فائدة، قم باختصاره.
 - لا تذكر اسم قناة المصدر أو روابطها نهائياً."""
     },
@@ -46,8 +45,8 @@ CHANNELS = {
         "fb_page_id": PAGE_ID_IRAQ, 
         "fb_token": FB_TOKEN_IRAQ,
         "prompt": """أنت محرر صحفي عراقي. أعد صياغة النص بأسلوب صحفي.
-- انشر أي خبر سياسي أو اقتصادي أو عام (اجعل should_post=true).
-- اجعل should_post=false فقط إذا كان إعلاناً تجارياً صريحاً جداً.
+- انشر الأخبار السياسية، الاقتصادية، أو العامة فقط.
+- **ممنوع النشر (اجعل should_post=false) لأي إعلان تجاري، بيع، اشتراك، طلب مراسلة معرف، أو عروض أسعار.**
 - إذا كان النص طويلاً جداً، قم باختصاره بدون حذف المعلومات المهمة.
 - لا تذكر اسم قناة المصدر أو روابطها نهائياً."""
     },
@@ -57,8 +56,8 @@ CHANNELS = {
         "fb_page_id": PAGE_ID_STUDENT, 
         "fb_token": FB_TOKEN_STUDENT,
         "prompt": """أنت محرر لقناة تعليمية (مكتبة الطالب). 
-- انشر أي شيء يتعلق بالدراسة، الجامعات، وزارة التربية، أو حتى بيع الملخصات والكتب الدراسية (اجعل should_post=true).
-- اجعل should_post=false فقط إذا كان المنشور لا علاقة له بالتعليم أو الطلبة إطلاقاً.
+- انشر الأخبار التربوية، التعليمية، والمنح الدراسية المجانية فقط.
+- **ممنوع النشر (اجعل should_post=false) نهائياً لأي منشور يحتوي على: (بيع ملخصات، كتب للبيع، دورات مدفوعة، طلب مراسلة معرف معين، أسعار، أو عروض).**
 - أعد صياغة النص بشكل واضح ومختصر.
 - لا تذكر اسم قناة المصدر أو روابطها نهائياً."""
     },
@@ -76,8 +75,7 @@ def load_state():
 def save_state(state):
     with open(STATE_FILE, "w", encoding="utf-8") as f: json.dump(state, f, ensure_ascii=False, indent=2)
 
-# في وضع التجربة، نتجاهل الحالة القديمة
-state = {} if TEST_MODE else load_state()
+state = load_state()
 DUP_HISTORY_SIZE = 30
 DUP_SIMILARITY_THRESHOLD = 0.80   
 
@@ -169,6 +167,18 @@ def clean_text(text, source_username=None):
 
 def contains_click_here_phrase(text): return bool(re.search(r'اضغط\s*هنا.{0,15}(للمشاهدة|لمشاهدة|مشاهدة)', text)) if text else False
 
+# 🛡️ فلتر برمجي صارم (لن يمر أي إعلان حتى لو حاول الذكاء الاصطناعي قبوله)
+def is_hardcoded_ad(text):
+    if not text: return False
+    ad_keywords = [
+        r"راسل\s+المعرف", r"@IQED3", r"للحجز", r"للطلب", r"للتواصل",
+        r"سعر", r"دينار", r"خصم", r"اشتراك", r"ملخصات\s+ذهبية"
+    ]
+    for kw in ad_keywords:
+        if re.search(kw, text, re.IGNORECASE):
+            return True
+    return False
+
 def call_groq(prompt, max_retries=3):
     if not GROQ_API_KEY: raise RuntimeError("no groq key")
     url = "https://api.groq.com/openai/v1/chat/completions"
@@ -208,33 +218,24 @@ async def apply_processing(config, text):
         return {"should_post": False, "text": ""}
 
 def post_to_facebook(page_id, token, text, media_data=None, is_video=False):
-    if not page_id:
-        print("❌ خطأ: معرف الصفحة (page_id) مفقود!")
-        return
-    if not token:
-        print("❌ خطأ: التوكن (Token) مفقود لهذه الصفحة!")
-        return
-        
+    if not page_id or not token: return
     try:
         base_url = f"{GRAPH}/{page_id}"
         if media_data:
             if is_video:
-                print("📤 جاري رفع فيديو...")
                 res = requests.post(f"{base_url}/videos", data={"access_token": token, "description": text}, files={"source": ("video.mp4", media_data)}, timeout=120)
             else:
-                print("📤 جاري رفع صورة...")
                 res = requests.post(f"{base_url}/photos", data={"access_token": token, "message": text}, files={"source": ("image.jpg", media_data)}, timeout=60)
         else:
-            print("📤 جاري رفع نص فقط...")
             res = requests.post(f"{base_url}/feed", data={"access_token": token, "message": text}, timeout=30)
         
         res_data = res.json()
         if "error" in res_data:
-            print(f"❌ رفض فيسبوك النشر: {res_data['error']['message']}")
+            print(f"❌ خطأ فيسبوك: {res_data['error']['message']}")
             return
             
         post_id = res_data.get("post_id") or res_data.get("id")
-        print(f"✅✅✅ نجح النشر على فيسبوك! (رقم المنشور: {post_id})")
+        print(f"✅ نُشر على فيسبوك ({page_id})")
         
         comment_text = ""
         if page_id == PAGE_ID_KIRKUK: comment_text = "تابعنا على التلكرام 👇\nhttps://t.me/KirkukNow24H"
@@ -243,9 +244,8 @@ def post_to_facebook(page_id, token, text, media_data=None, is_video=False):
         
         if comment_text:
             requests.post(f"{GRAPH}/{post_id}/comments", data={"access_token": token, "message": comment_text}, timeout=30)
-            print(f"✅ تمت إضافة تعليق بنجاح.")
     except Exception as e:
-        print(f"❌ حدث خطأ غير متوقع أثناء الاتصال بفيسبوك: {e}")
+        print(f"❌ فشل النشر على فيسبوك: {e}")
 
 async def process_batch(source_id, messages):
     config = CHANNELS.get(source_id)
@@ -256,6 +256,11 @@ async def process_batch(source_id, messages):
     
     if contains_click_here_phrase(raw_text): return
     
+    # 1. الفحص البرمجي الصارم للإعلانات
+    if is_hardcoded_ad(raw_text):
+        print(f"⏭️ تجاهل إعلان تجاري (فلتر برمجي) — {config['name']}")
+        return
+    
     hidden_links = extract_hidden_link_urls(text_msg, config.get("source_username"))
     if hidden_links: 
         raw_text = (raw_text.rstrip() + "\n\n" + "\n".join(hidden_links)) if raw_text else "\n".join(hidden_links)
@@ -264,6 +269,7 @@ async def process_batch(source_id, messages):
     
     if is_duplicate_content(source_id, cleaned): return
     
+    # 2. فحص الذكاء الاصطناعي
     res = await apply_processing(config, cleaned)
     should_post = res.get("should_post", True)
     final_text = res.get("text", cleaned)
@@ -282,7 +288,6 @@ async def process_batch(source_id, messages):
     
     if media_msgs:
         first_m = media_msgs[0]
-        # التحقق مما إذا كانت الرسالة فيديو
         if isinstance(first_m.media, MessageMediaDocument) and first_m.video:
             is_video = True
         try: 
@@ -290,9 +295,7 @@ async def process_batch(source_id, messages):
         except Exception as e: 
             print(f"⚠️ فشل تحميل الميديا: {e}")
 
-    if not final_text.strip() and not media_data:
-        print(f"⏭️ تجاهل منشور فارغ — {config['name']}")
-        return
+    if not final_text.strip() and not media_data: return
 
     if config.get("fb_token") and config.get("fb_page_id"):
         post_to_facebook(config["fb_page_id"], config["fb_token"], final_text, media_data, is_video)
@@ -301,9 +304,7 @@ async def catch_up_channel(source_id):
     config = CHANNELS.get(source_id, {})
     entity_ref = config.get("source_username") or source_id
     
-    # 🛠️ وضع التجربة: جلب آخر 5 رسائل دائماً
     if TEST_MODE:
-        print(f"🧪 وضع التجربة مفعل: جاري جلب آخر 5 منشورات لـ {config.get('name')}")
         messages = await client.get_messages(entity_ref, limit=5)
     else:
         last_id = state.get(str(source_id), 0)
@@ -333,18 +334,13 @@ async def catch_up_channel(source_id):
         state[str(source_id)] = new_last
 
 async def main():
-    print("🚀 بدء التشغيل...")
     await client.start()
-    
     tasks = []
     for source_id in CHANNELS:
         tasks.append(catch_up_channel(source_id))
-        
     await asyncio.gather(*tasks)
-        
     await client.disconnect()
     commit_state()
-    print("✅ انتهت التشغيلة.")
 
 if __name__ == "__main__":
     asyncio.run(main())
