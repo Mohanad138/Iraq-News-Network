@@ -1,19 +1,15 @@
 name: Iraq News Network
-
 on:
   schedule:
     - cron: "*/10 * * * *"
   workflow_dispatch:
   repository_dispatch:
     types: [run-network]
-
 concurrency:
   group: relay-network
   cancel-in-progress: false
-
 permissions:
   contents: write
-
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -22,25 +18,23 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
       - run: pip install -r requirements.txt
-
       - run: |
           git config user.name "relay-bot"
           git config user.email "relay-bot@users.noreply.github.com"
-
       - name: Run bot
         env:
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           TG_SESSION: ${{ secrets.TG_SESSION }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          FB_TOKEN: ${{ secrets.FB_TOKEN }}
+          FB_TOKEN_KIRKUK: ${{ secrets.FB_TOKEN_KIRKUK }}
+          FB_TOKEN_IRAQ: ${{ secrets.FB_TOKEN_IRAQ }}
+          FB_TOKEN_STUDENT: ${{ secrets.FB_TOKEN_STUDENT }}
           PAGE_ID_KIRKUK: ${{ secrets.PAGE_ID_KIRKUK }}
-          PAGE_ID_STUDENT: ${{ secrets.PAGE_ID_STUDENT }}
           PAGE_ID_IRAQ: ${{ secrets.PAGE_ID_IRAQ }}
+          PAGE_ID_STUDENT: ${{ secrets.PAGE_ID_STUDENT }}
         run: python main.py
