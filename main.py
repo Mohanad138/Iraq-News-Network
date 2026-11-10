@@ -217,13 +217,10 @@ def post_to_facebook(page_id, token, text, media_data=None, is_video=False):
         base_url = f"{GRAPH}/{page_id}"
         if media_data:
             if is_video:
-                # رفع فيديو
                 res = requests.post(f"{base_url}/videos", data={"access_token": token, "description": text}, files={"source": ("video.mp4", media_data)}, timeout=120)
             else:
-                # رفع صورة
                 res = requests.post(f"{base_url}/photos", data={"access_token": token, "message": text}, files={"source": ("image.jpg", media_data)}, timeout=60)
         else:
-            # نص فقط
             res = requests.post(f"{base_url}/feed", data={"access_token": token, "message": text}, timeout=30)
         
         res_data = res.json()
@@ -280,13 +277,17 @@ async def process_batch(source_id, messages):
     
     if media_msgs:
         first_m = media_msgs[0]
-        # التحقق مما إذا كانت الرسالة فيديو
         if isinstance(first_m.media, MessageMediaDocument) and first_m.video:
             is_video = True
         try: 
             media_data = await client.download_media(first_m, file=bytes)
         except Exception as e: 
             print(f"⚠️ فشل تحميل الميديا: {e}")
+
+    # حماية إضافية: لا تنشر شيئاً إذا كان فارغاً
+    if not final_text.strip() and not media_data:
+        print(f"⏭️ تجاهل منشور فارغ — {config['name']}")
+        return
 
     if config.get("fb_token") and config.get("fb_page_id"):
         post_to_facebook(config["fb_page_id"], config["fb_token"], final_text, media_data, is_video)
@@ -296,20 +297,21 @@ async def catch_up_channel(source_id):
     entity_ref = config.get("source_username") or source_id
     key = str(source_id)
     
+    # 🛠️ إصلاح الخطأ هنا: جلب آخر 5 رسائل بطريقة صحيحة
     if TEST_MODE:
         print(f"🧪 وضع التجربة مفعل: جاري جلب آخر 5 منشورات لـ {config.get('name')}")
-        last_id = 0
+        messages = await client.get_messages(entity_ref, limit=5)
     else:
         last_id = state.get(key, 0)
-    
-    if last_id == 0:
-        latest = await client.get_messages(entity_ref, limit=1)
-        if latest: last_id = max(latest[0].id - 5, 0) if not TEST_MODE else 0
-        state[key] = last_id
+        if last_id == 0:
+            latest = await client.get_messages(entity_ref, limit=1)
+            if latest: last_id = latest[0].id - 5
+            state[key] = last_id
+        messages = await client.get_messages(entity_ref, min_id=last_id, limit=200)
         
-    limit = 5 if TEST_MODE else 200
-    messages = await client.get_messages(entity_ref, min_id=last_id, limit=limit)
     if not messages: return
+    
+    # التأكد من الترتيب من الأقدم إلى الأحدث
     messages = list(reversed(messages))
     processed_ids = set()
     
