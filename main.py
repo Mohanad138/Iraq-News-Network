@@ -2,7 +2,7 @@
 import os, re, json, time, asyncio, subprocess, difflib
 from telethon import TelegramClient
 from telethon.sessions import StringSession
-from telethon.tl.types import (MessageMediaPhoto, MessageMediaDocument, MessageMediaWebPage)
+from telethon.tl.types import (MessageEntityTextUrl, MessageMediaPhoto, MessageMediaDocument, MessageMediaWebPage)
 import requests
 
 TG_API_ID = int(os.getenv("TG_API_ID"))
@@ -10,79 +10,170 @@ TG_API_HASH = os.getenv("TG_API_HASH")
 TG_SESSION = os.getenv("TG_SESSION")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# إعدادات فيسبوك
+# اسم النموذج الجديد والمستقر
+GROQ_MODEL = "openai/gpt-oss-120b"
+GRAPH = "https://graph.facebook.com/v21.0"
+STATE_FILE = "relay_state.json"
+DOWNLOAD_DIR = "downloads"
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+# إعدادات فيسبوك (تأكد من إضافتها في Secrets)
 FB_TOKEN = os.getenv("FB_TOKEN")
 PAGE_ID_KIRKUK = os.getenv("PAGE_ID_KIRKUK")
 PAGE_ID_STUDENT = os.getenv("PAGE_ID_STUDENT")
 PAGE_ID_IRAQ = os.getenv("PAGE_ID_IRAQ")
 
-GROQ_MODEL = "llama-3.3-70b-versatile"
-GRAPH = "https://graph.facebook.com/v21.0"
-STATE_FILE = "relay_state.json"
-os.makedirs("downloads", exist_ok=True)
-
-# اجعلها True أول مرة لينشر آخر 5 منشورات، ثم غيرها إلى False
-FORCE_POST_LAST_5 = True 
-
 CHANNELS = {
     -1001565832101: {
-        "name": "كركوك الآن", "target": None, "mode": "rephrase_ar",
-        "source_username": "@kirkukdiary", "add_link": False,
-        "fb_page_id": PAGE_ID_KIRKUK,
+        "name": "كركوك الآن", "target": None,
+        "source_username": "@kirkukdiary",
+        "add_link": False, "fb_page_id": PAGE_ID_KIRKUK,
+        "prompt": """أنت محرر صحفي عراقي. أعد صياغة النص بأسلوب صحفي. 
+- انشر أي خبر محلي أو عام (اجعل should_post=true). 
+- إذا كان إعلاناً تجارياً صريحاً (بيع، اشتراك، عروض) اجعل should_post=false.
+- إذا كان النص طويلاً جداً وبلا فائدة، قم باختصاره.
+- لا تذكر اسم قناة المصدر أو روابطها نهائياً."""
     },
     -1009001073232: {
-        "name": "العراق الآن", "target": None, "mode": "rephrase_ar",
-        "source_username": "@RN24_IQ", "add_link": False,
-        "fb_page_id": PAGE_ID_IRAQ,
+        "name": "العراق الآن", "target": None,
+        "source_username": "@RN24_IQ",
+        "add_link": False, "fb_page_id": PAGE_ID_IRAQ,
+        "prompt": """أنت محرر صحفي عراقي. أعد صياغة النص بأسلوب صحفي.
+- انشر أي خبر سياسي أو اقتصادي أو عام (اجعل should_post=true).
+- إذا كان إعلاناً تجارياً صريحاً اجعل should_post=false.
+- إذا كان النص طويلاً جداً، قم باختصاره بدون حذف المعلومات المهمة.
+- لا تذكر اسم قناة المصدر أو روابطها نهائياً."""
     },
     -1001530089992: {
-        "name": "مكتبة الطالب العراقي", "target": None, "mode": "rephrase_ar",
-        "source_username": "@v999v", "add_link": False,
-        "fb_page_id": PAGE_ID_STUDENT,
+        "name": "مكتبة الطالب العراقي", "target": None,
+        "source_username": "@eduiq23",
+        "add_link": False, "fb_page_id": PAGE_ID_STUDENT,
+        "prompt": """أنت محرر لقناة تعليمية (مكتبة الطالب). 
+- انشر فقط الأخبار التي تخص الطلبة، الجامعات، وزارة التربية، أو المنح الدراسية (اجعل should_post=true).
+- إذا كان إعلاناً تجارياً أو خبراً عاماً لا يخص الطلبة، اجعل should_post=false.
+- أعد صياغة النص بشكل واضح ومختصر.
+- لا تذكر اسم قناة المصدر أو روابطها نهائياً."""
     },
 }
 
 client = TelegramClient(StringSession(TG_SESSION), TG_API_ID, TG_API_HASH)
 
-# إذا كان FORCE_POST_LAST_5 مفعل، نمسح الحالة المحلية لتبدأ من جديد
-if FORCE_POST_LAST_5:
-    state = {}
-else:
+def load_state():
     if os.path.exists(STATE_FILE):
         try:
-            with open(STATE_FILE, "r", encoding="utf-8") as f: state = json.load(f)
-        except Exception: state = {}
-    else:
-        state = {}
+            with open(STATE_FILE, "r", encoding="utf-8") as f: return json.load(f)
+        except Exception: return {}
+    return {}
 
 def save_state(state):
     with open(STATE_FILE, "w", encoding="utf-8") as f: json.dump(state, f, ensure_ascii=False, indent=2)
 
+state = load_state()
+DUP_HISTORY_SIZE = 30
+DUP_SIMILARITY_THRESHOLD = 0.80   
+
+def _norm_for_dup(text):
+    t = text.lower()
+    t = re.sub(r'https?://\S+', ' ', t)
+    t = re.sub(r'[\u064B-\u065F\u0670\u0640]', '', t)
+    t = t.replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا').replace('ى', 'ي').replace('ة', 'ه')
+    t = re.sub(r'[^\w\u0600-\u06FF\s]', ' ', t)
+    return re.sub(r'\s+', ' ', t).strip()
+
 def is_duplicate_content(source_id, text):
     if not text or not text.strip(): return False
-    key = str(source_id)
-    recent = state.setdefault("recent_texts", {}).get(key, [])
-    norm = re.sub(r'\s+', ' ', text).strip().lower()
+    norm = _norm_for_dup(text)
+    if not norm: return False
+    recent = state.setdefault("recent_texts", {}).get(str(source_id), [])
     for prev in recent:
-        if difflib.SequenceMatcher(None, norm, prev).ratio() >= 0.85: return True
+        prev_norm = _norm_for_dup(prev)
+        if difflib.SequenceMatcher(None, norm, prev_norm).ratio() >= DUP_SIMILARITY_THRESHOLD: return True
     return False
 
 def record_published_text(source_id, text):
     if not text or not text.strip(): return
     key = str(source_id)
-    norm = re.sub(r'\s+', ' ', text).strip().lower()
+    norm = _norm_for_dup(text)
+    if not norm: return
     bucket = state.setdefault("recent_texts", {}).setdefault(key, [])
     bucket.append(norm)
-    state["recent_texts"][key] = bucket[-15:]
-    save_state(state)
+    state["recent_texts"][key] = bucket[-DUP_HISTORY_SIZE:]
 
 def commit_state():
+    save_state(state)
     try:
         subprocess.run(["git", "add", STATE_FILE], check=False)
-        subprocess.run(["git", "commit", "-m", "update state"], check=False, capture_output=True)
-        subprocess.run(["git", "pull", "--rebase", "origin", "main"], check=False, capture_output=True)
-        subprocess.run(["git", "push"], check=False, capture_output=True)
+        c = subprocess.run(["git", "commit", "-m", "update state"], capture_output=True, text=True)
+        if c.returncode != 0 and "nothing to commit" in (c.stdout + c.stderr).lower(): return
+        for attempt in range(1, 4):
+            subprocess.run(["git", "pull", "--rebase", "origin", "main"], capture_output=True, text=True)
+            p = subprocess.run(["git", "push"], capture_output=True, text=True)
+            if p.returncode == 0: return
+            time.sleep(2 * attempt)
+    except Exception as e: pass
+
+def _is_small_thumbnail_photo(photo):
+    try:
+        dims = [(getattr(s, "w", 0), getattr(s, "h", 0)) for s in photo.sizes if hasattr(s, "w")]
+        if not dims: return False
+        max_w = max(w for w, _ in dims)
+        max_h = max(h for _, h in dims)
+        if max_w < 250 and max_h < 250: return True
+        if max_w > 0 and max_h > 0:
+            ratio = max_w / max_h
+            if 0.85 <= ratio <= 1.18 and max(max_w, max_h) <= 800: return True
+        return False
+    except Exception: return False
+
+def _is_usable_media_msg(m):
+    media = m.media
+    if isinstance(media, (MessageMediaPhoto, MessageMediaDocument)): return True
+    if isinstance(media, MessageMediaWebPage):
+        wp = getattr(media, "webpage", None)
+        photo = getattr(wp, "photo", None)
+        if photo and not _is_small_thumbnail_photo(photo): return True
+    return False
+
+def _media_payload(m):
+    if isinstance(m.media, MessageMediaWebPage): return m.photo
+    return m.media
+
+def extract_hidden_link_urls(message, source_username=None):
+    if not message or not getattr(message, "entities", None): return []
+    handle = (source_username or "").lstrip("@").lower()
+    skip_anchor_re = re.compile(r'read\s*more|اقرأ\s*المزيد', re.IGNORECASE)
+    urls = []
+    try:
+        for entity, anchor_text in message.get_entities_text(MessageEntityTextUrl):
+            url = entity.url
+            if handle and f"t.me/{handle}".lower() in url.lower(): continue
+            if skip_anchor_re.search(anchor_text or ""): continue
+            urls.append(url)
     except Exception: pass
+    return urls
+
+def clean_text(text, source_username=None):
+    if not text: return ""
+    cleaned = text.replace('📊', '')
+    if source_username: cleaned = re.sub(re.escape(source_username), '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'(https?://)?t\.me/\S+', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'https?://t\.co/\S+', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'(?i)forwarded from.*', '', cleaned)
+    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned).strip()
+    return cleaned
+
+def contains_click_here_phrase(text): return bool(re.search(r'اضغط\s*هنا.{0,15}(للمشاهدة|لمشاهدة|مشاهدة)', text)) if text else False
+
+def is_hardcoded_ad(text):
+    if not text: return False
+    ad_keywords = [
+        r"راسل\s+المعرف", r"للحجز", r"للطلب", 
+        r"سعر", r"دينار", r"خصم", r"اشتراك"
+    ]
+    for kw in ad_keywords:
+        if re.search(kw, text, re.IGNORECASE):
+            return True
+    return False
 
 def call_groq(prompt, max_retries=3):
     if not GROQ_API_KEY: raise RuntimeError("no groq key")
@@ -100,27 +191,30 @@ def call_groq(prompt, max_retries=3):
             if attempt == max_retries: raise e
             time.sleep(2 ** attempt)
 
-def call_rephrase(text):
-    prompt = f"""أنت محرر صحفي عراقي. أعد صياغة النص بأسلوب صحفي احترافي.
-تجاهل الروابط. إذا كان إعلاناً تجارياً اجعل should_post=false، عدا ذلك انشره (true).
-النص:
+async def apply_processing(config, text):
+    if not text: return {"should_post": True, "text": ""}
+    custom_prompt = config.get("prompt", "")
+    if not custom_prompt: return {"should_post": True, "text": text}
+    
+    full_prompt = f"""{custom_prompt}
+
+النص المراد معالجته:
 {text}
-أعد النتيجة بصيغة JSON فقط: {{"should_post": true/false, "text": "النص المعاد صياغته"}}"""
+
+أعد النتيجة بصيغة JSON فقط: {{"should_post": true/false, "text": "النص المعالج"}}"""
     try:
-        res_raw = call_groq(prompt)
+        res_raw = call_groq(full_prompt)
         if res_raw.startswith("```"):
             res_raw = res_raw.strip("`").strip()
             if res_raw.lower().startswith("json"): res_raw = res_raw[4:].strip()
         res = json.loads(res_raw)
         return {"should_post": bool(res.get("should_post", True)), "text": (res.get("text") or text).strip()}
     except Exception as e:
-        print(f"❌ خطأ الصياغة: {e}")
+        print(f"❌ خطأ المعالجة: {e}")
         return {"should_post": False, "text": ""}
 
 def post_to_facebook(page_id, token, text, image_data=None):
-    if not page_id or not token: 
-        print("❌ خطأ: معرف الصفحة أو التوكن غير موجود!")
-        return
+    if not page_id or not token: return
     try:
         base_url = f"{GRAPH}/{page_id}"
         if image_data:
@@ -150,22 +244,42 @@ def post_to_facebook(page_id, token, text, image_data=None):
 async def process_batch(source_id, messages):
     config = CHANNELS.get(source_id)
     if not config: return
-    raw_text = next((m.message for m in messages if m.message), "")
-    if not raw_text: return
-    if is_duplicate_content(source_id, raw_text): return
     
-    res = call_rephrase(raw_text)
-    if not res["should_post"] or not res["text"]: return
-    final_text = res["text"]
-    record_published_text(source_id, raw_text)
-        
-    media_msgs = [m for m in messages if m.media and not m.video]
+    raw_text = next((m.message for m in messages if m.message), "")
+    text_msg = next((m for m in messages if m.message), None)
+    
+    if contains_click_here_phrase(raw_text): return
+    
+    if is_hardcoded_ad(raw_text):
+        print(f"⏭️ تجاهل إعلان تجاري (فلتر برمجي) — {config['name']}")
+        return
+    
+    hidden_links = extract_hidden_link_urls(text_msg, config.get("source_username"))
+    if hidden_links: 
+        raw_text = (raw_text.rstrip() + "\n\n" + "\n".join(hidden_links)) if raw_text else "\n".join(hidden_links)
+    
+    cleaned = clean_text(raw_text, config.get("source_username"))
+    
+    if is_duplicate_content(source_id, cleaned): return
+    
+    res = await apply_processing(config, cleaned)
+    should_post = res.get("should_post", True)
+    final_text = res.get("text", cleaned)
+    
+    if not should_post and cleaned: 
+        print(f"⏭️ تجاهل إعلان (ذكاء اصطناعي) — {config['name']}")
+        return 
+    
+    if cleaned: record_published_text(source_id, cleaned)
+    if final_text and is_duplicate_content(f"{source_id}#final", final_text): return
+    if final_text: record_published_text(f"{source_id}#final", final_text)
+    
+    media_msgs = [m for m in messages if _is_usable_media_msg(m)]
     media_data = None
     if media_msgs:
         try: media_data = await client.download_media(media_msgs[0], file=bytes)
         except Exception: pass
 
-    # تم إلغاء النشر على تيليجرام، النشر على فيسبوك فقط
     if FB_TOKEN and config.get("fb_page_id"):
         post_to_facebook(config["fb_page_id"], FB_TOKEN, final_text, media_data)
 
@@ -175,33 +289,34 @@ async def catch_up_channel(source_id):
     key = str(source_id)
     last_id = state.get(key, 0)
     
-    # السر هنا: إذا كنا في وضع النشر الأول (FORCE_POST_LAST_5) أو last_id=0، نطلب آخر 5 رسائل فقط
-    limit = 5 if (FORCE_POST_LAST_5 or last_id == 0) else 100
-    
     if last_id == 0:
         latest = await client.get_messages(entity_ref, limit=1)
         if latest: last_id = max(latest[0].id - 5, 0)
         state[key] = last_id
-        save_state(state)
         
-    messages = await client.get_messages(entity_ref, min_id=last_id, limit=limit)
+    messages = await client.get_messages(entity_ref, min_id=last_id, limit=200)
     if not messages: return
     messages = list(reversed(messages))
+    processed_ids = set()
+    
     for msg in messages:
+        if msg.id in processed_ids: continue
         if msg.grouped_id:
-            group = [m for m in messages if m.grouped_id == msg.grouped_id]
+            group = [m for m in messages if m.grouped_id == msg.grouped_id and m.id not in processed_ids]
             group.sort(key=lambda m: m.id)
             await process_batch(source_id, group)
+            processed_ids.update(m.id for m in group)
             new_last = group[-1].id
         else:
             await process_batch(source_id, [msg])
+            processed_ids.add(msg.id)
             new_last = msg.id
         state[key] = new_last
-        save_state(state)
 
 async def main():
     await client.start()
     
+    # تشغيل القنوات الثلاث في نفس الوقت لتسريع العملية
     tasks = []
     for source_id in CHANNELS:
         tasks.append(catch_up_channel(source_id))
