@@ -10,47 +10,54 @@ TG_API_HASH = os.getenv("TG_API_HASH")
 TG_SESSION = os.getenv("TG_SESSION")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# اسم النموذج الجديد والمستقر
 GROQ_MODEL = "openai/gpt-oss-120b"
 GRAPH = "https://graph.facebook.com/v21.0"
 STATE_FILE = "relay_state.json"
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# إعدادات فيسبوك (تأكد من إضافتها في Secrets)
-FB_TOKEN = os.getenv("FB_TOKEN")
-PAGE_ID_KIRKUK = os.getenv("PAGE_ID_KIRKUK")
-PAGE_ID_STUDENT = os.getenv("PAGE_ID_STUDENT")
-PAGE_ID_IRAQ = os.getenv("PAGE_ID_IRAQ")
+# ⚠️ اجعلها True لكي ينشر آخر 5 منشورات، وبعدها أرجعها False
+TEST_MODE = True 
+
+FB_TOKEN_KIRKUK = os.getenv("FB_TOKEN_KIRKUK")
+FB_TOKEN_IRAQ = os.getenv("FB_TOKEN_IRAQ")
+FB_TOKEN_STUDENT = os.getenv("FB_TOKEN_STUDENT")
+
+PAGE_ID_KIRKUK = "1471628069360553"
+PAGE_ID_STUDENT = "1361819777022332"
+PAGE_ID_IRAQ = "1278874611967737"
 
 CHANNELS = {
     -1001565832101: {
         "name": "كركوك الآن", "target": None,
         "source_username": "@kirkukdiary",
-        "add_link": False, "fb_page_id": PAGE_ID_KIRKUK,
+        "fb_page_id": PAGE_ID_KIRKUK, 
+        "fb_token": FB_TOKEN_KIRKUK,
         "prompt": """أنت محرر صحفي عراقي. أعد صياغة النص بأسلوب صحفي. 
 - انشر أي خبر محلي أو عام (اجعل should_post=true). 
-- إذا كان إعلاناً تجارياً صريحاً (بيع، اشتراك، عروض) اجعل should_post=false.
+- اجعل should_post=false فقط إذا كان إعلاناً تجارياً صريحاً جداً (بيع منتجات، عروض أسعار).
 - إذا كان النص طويلاً جداً وبلا فائدة، قم باختصاره.
 - لا تذكر اسم قناة المصدر أو روابطها نهائياً."""
     },
     -1009001073232: {
         "name": "العراق الآن", "target": None,
         "source_username": "@RN24_IQ",
-        "add_link": False, "fb_page_id": PAGE_ID_IRAQ,
+        "fb_page_id": PAGE_ID_IRAQ, 
+        "fb_token": FB_TOKEN_IRAQ,
         "prompt": """أنت محرر صحفي عراقي. أعد صياغة النص بأسلوب صحفي.
 - انشر أي خبر سياسي أو اقتصادي أو عام (اجعل should_post=true).
-- إذا كان إعلاناً تجارياً صريحاً اجعل should_post=false.
+- اجعل should_post=false فقط إذا كان إعلاناً تجارياً صريحاً جداً.
 - إذا كان النص طويلاً جداً، قم باختصاره بدون حذف المعلومات المهمة.
 - لا تذكر اسم قناة المصدر أو روابطها نهائياً."""
     },
     -1001530089992: {
         "name": "مكتبة الطالب العراقي", "target": None,
         "source_username": "@eduiq23",
-        "add_link": False, "fb_page_id": PAGE_ID_STUDENT,
+        "fb_page_id": PAGE_ID_STUDENT, 
+        "fb_token": FB_TOKEN_STUDENT,
         "prompt": """أنت محرر لقناة تعليمية (مكتبة الطالب). 
-- انشر فقط الأخبار التي تخص الطلبة، الجامعات، وزارة التربية، أو المنح الدراسية (اجعل should_post=true).
-- إذا كان إعلاناً تجارياً أو خبراً عاماً لا يخص الطلبة، اجعل should_post=false.
+- انشر أي شيء يتعلق بالدراسة، الجامعات، وزارة التربية، أو حتى بيع الملخصات والكتب الدراسية (اجعل should_post=true).
+- اجعل should_post=false فقط إذا كان المنشور لا علاقة له بالتعليم أو الطلبة إطلاقاً.
 - أعد صياغة النص بشكل واضح ومختصر.
 - لا تذكر اسم قناة المصدر أو روابطها نهائياً."""
     },
@@ -164,17 +171,6 @@ def clean_text(text, source_username=None):
 
 def contains_click_here_phrase(text): return bool(re.search(r'اضغط\s*هنا.{0,15}(للمشاهدة|لمشاهدة|مشاهدة)', text)) if text else False
 
-def is_hardcoded_ad(text):
-    if not text: return False
-    ad_keywords = [
-        r"راسل\s+المعرف", r"للحجز", r"للطلب", 
-        r"سعر", r"دينار", r"خصم", r"اشتراك"
-    ]
-    for kw in ad_keywords:
-        if re.search(kw, text, re.IGNORECASE):
-            return True
-    return False
-
 def call_groq(prompt, max_retries=3):
     if not GROQ_API_KEY: raise RuntimeError("no groq key")
     url = "https://api.groq.com/openai/v1/chat/completions"
@@ -213,18 +209,26 @@ async def apply_processing(config, text):
         print(f"❌ خطأ المعالجة: {e}")
         return {"should_post": False, "text": ""}
 
-def post_to_facebook(page_id, token, text, image_data=None):
-    if not page_id or not token: return
+def post_to_facebook(page_id, token, text, media_data=None, is_video=False):
+    if not page_id or not token: 
+        print("❌ خطأ: معرف الصفحة أو التوكن غير موجود!")
+        return
     try:
         base_url = f"{GRAPH}/{page_id}"
-        if image_data:
-            res = requests.post(f"{base_url}/photos", data={"access_token": token, "message": text}, files={"source": ("image.jpg", image_data)}, timeout=30)
+        if media_data:
+            if is_video:
+                # رفع فيديو
+                res = requests.post(f"{base_url}/videos", data={"access_token": token, "description": text}, files={"source": ("video.mp4", media_data)}, timeout=120)
+            else:
+                # رفع صورة
+                res = requests.post(f"{base_url}/photos", data={"access_token": token, "message": text}, files={"source": ("image.jpg", media_data)}, timeout=60)
         else:
+            # نص فقط
             res = requests.post(f"{base_url}/feed", data={"access_token": token, "message": text}, timeout=30)
         
         res_data = res.json()
         if "error" in res_data:
-            print(f"❌ خطأ فيسبوك: {res_data['error']['message']}")
+            print(f"❌ خطأ فيسبوك ({page_id}): {res_data['error']['message']}")
             return
             
         post_id = res_data.get("post_id") or res_data.get("id")
@@ -250,10 +254,6 @@ async def process_batch(source_id, messages):
     
     if contains_click_here_phrase(raw_text): return
     
-    if is_hardcoded_ad(raw_text):
-        print(f"⏭️ تجاهل إعلان تجاري (فلتر برمجي) — {config['name']}")
-        return
-    
     hidden_links = extract_hidden_link_urls(text_msg, config.get("source_username"))
     if hidden_links: 
         raw_text = (raw_text.rstrip() + "\n\n" + "\n".join(hidden_links)) if raw_text else "\n".join(hidden_links)
@@ -276,25 +276,39 @@ async def process_batch(source_id, messages):
     
     media_msgs = [m for m in messages if _is_usable_media_msg(m)]
     media_data = None
+    is_video = False
+    
     if media_msgs:
-        try: media_data = await client.download_media(media_msgs[0], file=bytes)
-        except Exception: pass
+        first_m = media_msgs[0]
+        # التحقق مما إذا كانت الرسالة فيديو
+        if isinstance(first_m.media, MessageMediaDocument) and first_m.video:
+            is_video = True
+        try: 
+            media_data = await client.download_media(first_m, file=bytes)
+        except Exception as e: 
+            print(f"⚠️ فشل تحميل الميديا: {e}")
 
-    if FB_TOKEN and config.get("fb_page_id"):
-        post_to_facebook(config["fb_page_id"], FB_TOKEN, final_text, media_data)
+    if config.get("fb_token") and config.get("fb_page_id"):
+        post_to_facebook(config["fb_page_id"], config["fb_token"], final_text, media_data, is_video)
 
 async def catch_up_channel(source_id):
     config = CHANNELS.get(source_id, {})
     entity_ref = config.get("source_username") or source_id
     key = str(source_id)
-    last_id = state.get(key, 0)
+    
+    if TEST_MODE:
+        print(f"🧪 وضع التجربة مفعل: جاري جلب آخر 5 منشورات لـ {config.get('name')}")
+        last_id = 0
+    else:
+        last_id = state.get(key, 0)
     
     if last_id == 0:
         latest = await client.get_messages(entity_ref, limit=1)
-        if latest: last_id = max(latest[0].id - 5, 0)
+        if latest: last_id = max(latest[0].id - 5, 0) if not TEST_MODE else 0
         state[key] = last_id
         
-    messages = await client.get_messages(entity_ref, min_id=last_id, limit=200)
+    limit = 5 if TEST_MODE else 200
+    messages = await client.get_messages(entity_ref, min_id=last_id, limit=limit)
     if not messages: return
     messages = list(reversed(messages))
     processed_ids = set()
@@ -316,7 +330,6 @@ async def catch_up_channel(source_id):
 async def main():
     await client.start()
     
-    # تشغيل القنوات الثلاث في نفس الوقت لتسريع العملية
     tasks = []
     for source_id in CHANNELS:
         tasks.append(catch_up_channel(source_id))
