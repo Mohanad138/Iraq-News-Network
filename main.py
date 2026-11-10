@@ -16,16 +16,17 @@ STATE_FILE = "relay_state.json"
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# ⚠️ وضع الفحص العميق (True) سيتخطى الذكاء الاصطناعي وينشر آخر 5 منشورات فوراً
+# ⚠️ اجعلها True لكي ينشر آخر 5 منشورات (وضع التجربة)، وبعدها أرجعها False
 TEST_MODE = True 
 
+# إعدادات فيسبوك (تُقرأ من الأسرار في GitHub)
 FB_TOKEN_KIRKUK = os.getenv("FB_TOKEN_KIRKUK")
 FB_TOKEN_IRAQ = os.getenv("FB_TOKEN_IRAQ")
 FB_TOKEN_STUDENT = os.getenv("FB_TOKEN_STUDENT")
 
-PAGE_ID_KIRKUK = "1471628069360553"
-PAGE_ID_STUDENT = "1361819777022332"
-PAGE_ID_IRAQ = "1278874611967737"
+PAGE_ID_KIRKUK = os.getenv("PAGE_ID_KIRKUK")
+PAGE_ID_STUDENT = os.getenv("PAGE_ID_STUDENT")
+PAGE_ID_IRAQ = os.getenv("PAGE_ID_IRAQ")
 
 CHANNELS = {
     -1001565832101: {
@@ -33,18 +34,33 @@ CHANNELS = {
         "source_username": "@kirkukdiary",
         "fb_page_id": PAGE_ID_KIRKUK, 
         "fb_token": FB_TOKEN_KIRKUK,
+        "prompt": """أنت محرر صحفي عراقي. أعد صياغة النص بأسلوب صحفي. 
+- انشر أي خبر محلي أو عام (اجعل should_post=true). 
+- اجعل should_post=false فقط إذا كان إعلاناً تجارياً صريحاً جداً (بيع منتجات، عروض أسعار).
+- إذا كان النص طويلاً جداً وبلا فائدة، قم باختصاره.
+- لا تذكر اسم قناة المصدر أو روابطها نهائياً."""
     },
     -1009001073232: {
         "name": "العراق الآن", "target": None,
         "source_username": "@RN24_IQ",
         "fb_page_id": PAGE_ID_IRAQ, 
         "fb_token": FB_TOKEN_IRAQ,
+        "prompt": """أنت محرر صحفي عراقي. أعد صياغة النص بأسلوب صحفي.
+- انشر أي خبر سياسي أو اقتصادي أو عام (اجعل should_post=true).
+- اجعل should_post=false فقط إذا كان إعلاناً تجارياً صريحاً جداً.
+- إذا كان النص طويلاً جداً، قم باختصاره بدون حذف المعلومات المهمة.
+- لا تذكر اسم قناة المصدر أو روابطها نهائياً."""
     },
     -1001530089992: {
         "name": "مكتبة الطالب العراقي", "target": None,
         "source_username": "@eduiq23",
         "fb_page_id": PAGE_ID_STUDENT, 
         "fb_token": FB_TOKEN_STUDENT,
+        "prompt": """أنت محرر لقناة تعليمية (مكتبة الطالب). 
+- انشر أي شيء يتعلق بالدراسة، الجامعات، وزارة التربية، أو حتى بيع الملخصات والكتب الدراسية (اجعل should_post=true).
+- اجعل should_post=false فقط إذا كان المنشور لا علاقة له بالتعليم أو الطلبة إطلاقاً.
+- أعد صياغة النص بشكل واضح ومختصر.
+- لا تذكر اسم قناة المصدر أو روابطها نهائياً."""
     },
 }
 
@@ -60,8 +76,50 @@ def load_state():
 def save_state(state):
     with open(STATE_FILE, "w", encoding="utf-8") as f: json.dump(state, f, ensure_ascii=False, indent=2)
 
-# في وضع التجربة، نبدأ بملف حالة فارغ (تجاهل الملف المحفوظ)
+# في وضع التجربة، نتجاهل الحالة القديمة
 state = {} if TEST_MODE else load_state()
+DUP_HISTORY_SIZE = 30
+DUP_SIMILARITY_THRESHOLD = 0.80   
+
+def _norm_for_dup(text):
+    t = text.lower()
+    t = re.sub(r'https?://\S+', ' ', t)
+    t = re.sub(r'[\u064B-\u065F\u0670\u0640]', '', t)
+    t = t.replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا').replace('ى', 'ي').replace('ة', 'ه')
+    t = re.sub(r'[^\w\u0600-\u06FF\s]', ' ', t)
+    return re.sub(r'\s+', ' ', t).strip()
+
+def is_duplicate_content(source_id, text):
+    if not text or not text.strip(): return False
+    norm = _norm_for_dup(text)
+    if not norm: return False
+    recent = state.setdefault("recent_texts", {}).get(str(source_id), [])
+    for prev in recent:
+        prev_norm = _norm_for_dup(prev)
+        if difflib.SequenceMatcher(None, norm, prev_norm).ratio() >= DUP_SIMILARITY_THRESHOLD: return True
+    return False
+
+def record_published_text(source_id, text):
+    if not text or not text.strip(): return
+    key = str(source_id)
+    norm = _norm_for_dup(text)
+    if not norm: return
+    bucket = state.setdefault("recent_texts", {}).setdefault(key, [])
+    bucket.append(norm)
+    state["recent_texts"][key] = bucket[-DUP_HISTORY_SIZE:]
+
+def commit_state():
+    save_state(state)
+    try:
+        subprocess.run(["git", "add", STATE_FILE], check=False)
+        c = subprocess.run(["git", "commit", "-m", "update state"], capture_output=True, text=True)
+        if c.returncode != 0 and "nothing to commit" in (c.stdout + c.stderr).lower(): return
+        for attempt in range(1, 4):
+            subprocess.run(["git", "pull", "--rebase", "origin", "main"], capture_output=True, text=True)
+            p = subprocess.run(["git", "push"], capture_output=True, text=True)
+            if p.returncode == 0: return
+            time.sleep(2 * attempt)
+    except Exception as e: pass
 
 def _is_small_thumbnail_photo(photo):
     try:
@@ -85,25 +143,78 @@ def _is_usable_media_msg(m):
         if photo and not _is_small_thumbnail_photo(photo): return True
     return False
 
+def extract_hidden_link_urls(message, source_username=None):
+    if not message or not getattr(message, "entities", None): return []
+    handle = (source_username or "").lstrip("@").lower()
+    skip_anchor_re = re.compile(r'read\s*more|اقرأ\s*المزيد', re.IGNORECASE)
+    urls = []
+    try:
+        for entity, anchor_text in message.get_entities_text(MessageEntityTextUrl):
+            url = entity.url
+            if handle and f"t.me/{handle}".lower() in url.lower(): continue
+            if skip_anchor_re.search(anchor_text or ""): continue
+            urls.append(url)
+    except Exception: pass
+    return urls
+
 def clean_text(text, source_username=None):
     if not text: return ""
     cleaned = text.replace('📊', '')
     if source_username: cleaned = re.sub(re.escape(source_username), '', cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r'(https?://)?t\.me/\S+', '', cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r'https?://t\.co/\S+', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'(?i)forwarded from.*', '', cleaned)
     cleaned = re.sub(r'\n{3,}', '\n\n', cleaned).strip()
     return cleaned
 
+def contains_click_here_phrase(text): return bool(re.search(r'اضغط\s*هنا.{0,15}(للمشاهدة|لمشاهدة|مشاهدة)', text)) if text else False
+
+def call_groq(prompt, max_retries=3):
+    if not GROQ_API_KEY: raise RuntimeError("no groq key")
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+    body = {"model": GROQ_MODEL, "messages": [{"role": "user", "content": prompt}], "temperature": 0.3}
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp = requests.post(url, json=body, headers=headers, timeout=30)
+            if resp.status_code in (429, 500, 502, 503, 504) and attempt < max_retries:
+                time.sleep(2 ** attempt); continue
+            resp.raise_for_status()
+            return resp.json()["choices"][0]["message"]["content"].strip()
+        except Exception as e:
+            if attempt == max_retries: raise e
+            time.sleep(2 ** attempt)
+
+async def apply_processing(config, text):
+    if not text: return {"should_post": True, "text": ""}
+    custom_prompt = config.get("prompt", "")
+    if not custom_prompt: return {"should_post": True, "text": text}
+    
+    full_prompt = f"""{custom_prompt}
+
+النص المراد معالجته:
+{text}
+
+أعد النتيجة بصيغة JSON فقط: {{"should_post": true/false, "text": "النص المعالج"}}"""
+    try:
+        res_raw = call_groq(full_prompt)
+        if res_raw.startswith("```"):
+            res_raw = res_raw.strip("`").strip()
+            if res_raw.lower().startswith("json"): res_raw = res_raw[4:].strip()
+        res = json.loads(res_raw)
+        return {"should_post": bool(res.get("should_post", True)), "text": (res.get("text") or text).strip()}
+    except Exception as e:
+        print(f"❌ خطأ المعالجة: {e}")
+        return {"should_post": False, "text": ""}
+
 def post_to_facebook(page_id, token, text, media_data=None, is_video=False):
     if not page_id:
-        print(f"❌ خطأ: معرف الصفحة (page_id) مفقود!")
+        print("❌ خطأ: معرف الصفحة (page_id) مفقود!")
         return
     if not token:
-        print(f"❌ خطأ: التوكن (Token) مفقود لهذه الصفحة! تأكد من إضافته في Secrets.")
+        print("❌ خطأ: التوكن (Token) مفقود لهذه الصفحة!")
         return
-    
-    print(f"🔑 التوكن موجود (طوله {len(token)} حرف). جاري محاولة النشر...")
-    
+        
     try:
         base_url = f"{GRAPH}/{page_id}"
         if media_data:
@@ -119,7 +230,7 @@ def post_to_facebook(page_id, token, text, media_data=None, is_video=False):
         
         res_data = res.json()
         if "error" in res_data:
-            print(f"❌ رفض فيسبوك النشر: {res_data['error']}")
+            print(f"❌ رفض فيسبوك النشر: {res_data['error']['message']}")
             return
             
         post_id = res_data.get("post_id") or res_data.get("id")
@@ -140,10 +251,30 @@ async def process_batch(source_id, messages):
     config = CHANNELS.get(source_id)
     if not config: return
     
-    print(f"--- 🔍 فحص منشور من {config['name']} ---")
-    
     raw_text = next((m.message for m in messages if m.message), "")
+    text_msg = next((m for m in messages if m.message), None)
+    
+    if contains_click_here_phrase(raw_text): return
+    
+    hidden_links = extract_hidden_link_urls(text_msg, config.get("source_username"))
+    if hidden_links: 
+        raw_text = (raw_text.rstrip() + "\n\n" + "\n".join(hidden_links)) if raw_text else "\n".join(hidden_links)
+    
     cleaned = clean_text(raw_text, config.get("source_username"))
+    
+    if is_duplicate_content(source_id, cleaned): return
+    
+    res = await apply_processing(config, cleaned)
+    should_post = res.get("should_post", True)
+    final_text = res.get("text", cleaned)
+    
+    if not should_post and cleaned: 
+        print(f"⏭️ تجاهل إعلان (ذكاء اصطناعي) — {config['name']}")
+        return 
+    
+    if cleaned: record_published_text(source_id, cleaned)
+    if final_text and is_duplicate_content(f"{source_id}#final", final_text): return
+    if final_text: record_published_text(f"{source_id}#final", final_text)
     
     media_msgs = [m for m in messages if _is_usable_media_msg(m)]
     media_data = None
@@ -151,33 +282,38 @@ async def process_batch(source_id, messages):
     
     if media_msgs:
         first_m = media_msgs[0]
+        # التحقق مما إذا كانت الرسالة فيديو
         if isinstance(first_m.media, MessageMediaDocument) and first_m.video:
             is_video = True
         try: 
             media_data = await client.download_media(first_m, file=bytes)
-            print(f"📥 تم تحميل الميديا ({'فيديو' if is_video else 'صورة'}).")
         except Exception as e: 
             print(f"⚠️ فشل تحميل الميديا: {e}")
 
-    if not cleaned.strip() and not media_data:
-        print(f"⏭️ تجاهل: المنشور فارغ (لا نص ولا صورة).")
+    if not final_text.strip() and not media_data:
+        print(f"⏭️ تجاهل منشور فارغ — {config['name']}")
         return
 
-    print(f"📝 النص الجاهز للنشر: {cleaned[:50]}...")
-
-    # في وضع التجربة، ننشر مباشرة إلى فيسبوك
-    post_to_facebook(config["fb_page_id"], config["fb_token"], cleaned, media_data, is_video)
+    if config.get("fb_token") and config.get("fb_page_id"):
+        post_to_facebook(config["fb_page_id"], config["fb_token"], final_text, media_data, is_video)
 
 async def catch_up_channel(source_id):
     config = CHANNELS.get(source_id, {})
     entity_ref = config.get("source_username") or source_id
     
-    print(f"📡 جلب آخر 5 منشورات من {config['name']}...")
-    messages = await client.get_messages(entity_ref, limit=5)
+    # 🛠️ وضع التجربة: جلب آخر 5 رسائل دائماً
+    if TEST_MODE:
+        print(f"🧪 وضع التجربة مفعل: جاري جلب آخر 5 منشورات لـ {config.get('name')}")
+        messages = await client.get_messages(entity_ref, limit=5)
+    else:
+        last_id = state.get(str(source_id), 0)
+        if last_id == 0:
+            latest = await client.get_messages(entity_ref, limit=1)
+            if latest: last_id = latest[0].id - 5
+            state[str(source_id)] = last_id
+        messages = await client.get_messages(entity_ref, min_id=last_id, limit=200)
         
-    if not messages: 
-        print(f"⚠️ لا توجد منشورات في {config['name']}.")
-        return
+    if not messages: return
     
     messages = list(reversed(messages))
     processed_ids = set()
@@ -189,9 +325,12 @@ async def catch_up_channel(source_id):
             group.sort(key=lambda m: m.id)
             await process_batch(source_id, group)
             processed_ids.update(m.id for m in group)
+            new_last = group[-1].id
         else:
             await process_batch(source_id, [msg])
             processed_ids.add(msg.id)
+            new_last = msg.id
+        state[str(source_id)] = new_last
 
 async def main():
     print("🚀 بدء التشغيل...")
@@ -204,6 +343,7 @@ async def main():
     await asyncio.gather(*tasks)
         
     await client.disconnect()
+    commit_state()
     print("✅ انتهت التشغيلة.")
 
 if __name__ == "__main__":
