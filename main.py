@@ -18,7 +18,6 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 TEST_MODE = False 
 
-# إعدادات فيسبوك
 FB_TOKEN_KIRKUK = os.getenv("FB_TOKEN_KIRKUK")
 FB_TOKEN_IRAQ = os.getenv("FB_TOKEN_IRAQ")
 FB_TOKEN_STUDENT = os.getenv("FB_TOKEN_STUDENT")
@@ -43,14 +42,15 @@ CHANNELS = {
 - اجعل should_post=false فقط إذا كان إعلاناً تجارياً صريحاً.
 - لا تذكر اسم قناة المصدر أو روابطها نهائياً."""
     },
+    # 👇 تم تغيير المصدر إلى @IRAQ2TV وتحديث التعليمات لتصبح مشوقة بدون زيادة
     -1009001073232: {
         "name": "العراق الآن", "target": None,
-        "source_username": "@RN24_IQ",
+        "source_username": "@IRAQ2TV", # 👈 المصدر الجديد
         "fb_page_id": PAGE_ID_IRAQ, 
         "fb_token": FB_TOKEN_IRAQ,
         "link": "https://t.me/IQNowNews",
-        "prompt": """أنت محرر صحفي عراقي. أعد ترتيب النص التالي ليكون مقروءاً.
-- ممنوع إضافة أي معلومة من عندك أو تغيير المعنى.
+        "prompt": """أنت محرر صحفي عراقي. أعد صياغة النص التالي ليكون جذاباً ومشوقاً للقراءة.
+- **تحذير هام جداً:** ممنوع منعاً باتاً إضافة أي معلومة، رقم، اسم، أو تفاصيل غير موجودة في النص الأصلي. مهمتك فقط إعادة ترتيب الكلمات الموجودة وجعلها مشوقة.
 - حافظ على الأرقام والأسماء كما هي تماماً.
 - انشر أي خبر سياسي أو اقتصادي أو عام (اجعل should_post=true).
 - اجعل should_post=false فقط إذا كان إعلاناً تجارياً صريحاً.
@@ -78,7 +78,7 @@ CHANNELS = {
         "fb_token": FB_TOKEN_GTA,
         "prompt": """أنت محرر لقناة عربية متخصصة في أخبار وتسريبات لعبة GTA 6.
 - ترجم النص إلى العربية بأسلوب طبيعي جداً كأن شخصاً عربياً كتب الخبر.
-- إذا ورد أي مبلغ بالعملة الروسية (الروبل)، قم بتحويله إلى الدولار الأمريكي واكتب السعر بالدولار مع كلمة "حوالي".
+- إذا ورد أي مبلغ بالعملة الروسية (الروبل)، قم بتحويله إلى الدولار الأمريكي (1 دولار ≈ 82.8 روبل) واكتب السعر بالدولار مع كلمة "حوالي" للتقريب.
 - احتفظ بالأرقام والأسماء كما هي.
 - لا تذكر اسم قناة المصدر أو روابطها نهائياً.
 - احذف أي عبارات ترويجية أو دعائية تخص قناة المصدر.
@@ -235,15 +235,6 @@ async def apply_processing(config, text):
         print(f"❌ خطأ المعالجة: {e}")
         return {"should_post": False, "text": ""}
 
-# دالة توليد الفوتر الذكي لفيسبوك
-def get_fb_footer(text, link):
-    if not link: return ""
-    result_keywords = [r"نتائج", r"قبول", r"أسماء", r"الدرجات", r"الامتحانات", r"كول"]
-    for kw in result_keywords:
-        if re.search(kw, text):
-            return f"\n\n📌 لمتابعة النتائج والأسماء أولاً بأول، انضموا لقناتنا على التليجرام:\n🔗 {link}"
-    return ""
-
 def _sync_post_to_facebook(page_id, token, text, media_data=None, is_video=False):
     if not page_id or not token: return
     try:
@@ -288,7 +279,7 @@ async def process_batch(source_id, messages):
     
     if contains_click_here_phrase(raw_text): return
     
-    if is_hardcoded_ad(raw_text):
+    if is_hardcoded_ad(raw_text): 
         print(f"⏭️ تجاهل إعلان تجاري (فلتر برمجي) — {config['name']}")
         return
     
@@ -327,11 +318,8 @@ async def process_batch(source_id, messages):
 
     if not final_text.strip() and not media_data: return
 
-    # النشر على فيسبوك
     if config.get("fb_token") and config.get("fb_page_id"):
-        # إضافة الفوتر الذكي لفيسبوك فقط
-        fb_text = final_text + get_fb_footer(final_text, config.get("link"))
-        await post_to_facebook(config["fb_page_id"], config["fb_token"], fb_text, media_data, is_video)
+        await post_to_facebook(config["fb_page_id"], config["fb_token"], final_text, media_data, is_video)
 
 async def catch_up_channel(source_id):
     config = CHANNELS.get(source_id, {})
