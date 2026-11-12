@@ -35,6 +35,7 @@ CHANNELS = {
         "source_username": "@kirkukdiary",
         "fb_page_id": PAGE_ID_KIRKUK, 
         "fb_token": FB_TOKEN_KIRKUK,
+        "link": "https://t.me/KirkukNow24H",
         "prompt": """أنت محرر صحفي عراقي. أعد ترتيب النص التالي ليكون مقروءاً. 
 - ممنوع إضافة أي معلومة من عندك أو تغيير المعنى.
 - حافظ على الأرقام والأسماء كما هي تماماً.
@@ -47,6 +48,7 @@ CHANNELS = {
         "source_username": "@RN24_IQ",
         "fb_page_id": PAGE_ID_IRAQ, 
         "fb_token": FB_TOKEN_IRAQ,
+        "link": "https://t.me/IQNowNews",
         "prompt": """أنت محرر صحفي عراقي. أعد ترتيب النص التالي ليكون مقروءاً.
 - ممنوع إضافة أي معلومة من عندك أو تغيير المعنى.
 - حافظ على الأرقام والأسماء كما هي تماماً.
@@ -59,14 +61,12 @@ CHANNELS = {
         "source_username": "@eduiq23",
         "fb_page_id": PAGE_ID_STUDENT, 
         "fb_token": FB_TOKEN_STUDENT,
-        "prompt": """أنت محرر لقناة تعليمية رسمية. 
-- انشر فقط الأخبار الرسمية والمؤكدة التي تخص التعليم (مثل: إعلان نتائج القبول، مواعيد الامتحانات الوزارية، منح دراسية حكومية).
-- **ممنوع النشر (اجعل should_post=false) لأي منشور يحتوي على:**
-  1. عروض، دورات مدفوعة، بيع ملخصات، أو كتب.
-  2. كلمات تدل على الترويج الشخصي مثل "حسب جدولنا"، "رابط في الأسفل".
-  3. إعلانات "امتحانات ابطال" أو أي شيء يبدو كترويج تجاري.
-- إذا كان المنشور مجرد تحديث يومي أو دعوة للمراجعة بدون خبر رسمي، ارفضه (should_post=false).
-- أعد ترتيب النص ليكون مقروءاً فقط.
+        "link": "https://t.me/TalibLib",
+        "prompt": """أنت محرر لقناة تعليمية. أعد ترتيب النص التالي ليكون مقروءاً.
+- ممنوع إضافة أي معلومة من عندك أو تغيير المعنى.
+- حافظ على الأرقام والأسماء كما هي تماماً.
+- انشر الأخبار التربوية والتعليمية فقط.
+- ممنوع النشر نهائياً لأي إعلان تجاري أو بيع ملخصات.
 - لا تذكر اسم قناة المصدر أو روابطها نهائياً."""
     },
     -1009003946451: {
@@ -78,7 +78,7 @@ CHANNELS = {
         "fb_token": FB_TOKEN_GTA,
         "prompt": """أنت محرر لقناة عربية متخصصة في أخبار وتسريبات لعبة GTA 6.
 - ترجم النص إلى العربية بأسلوب طبيعي جداً كأن شخصاً عربياً كتب الخبر.
-- إذا ورد أي مبلغ بالعملة الروسية (الروبل)، قم بتحويله إلى الدولار الأمريكي (1 دولار ≈ 82.8 روبل) واكتب السعر بالدولار مع كلمة "حوالي" للتقريب.
+- إذا ورد أي مبلغ بالعملة الروسية (الروبل)، قم بتحويله إلى الدولار الأمريكي واكتب السعر بالدولار مع كلمة "حوالي".
 - احتفظ بالأرقام والأسماء كما هي.
 - لا تذكر اسم قناة المصدر أو روابطها نهائياً.
 - احذف أي عبارات ترويجية أو دعائية تخص قناة المصدر.
@@ -185,30 +185,16 @@ def clean_text(text, source_username=None):
     cleaned = re.sub(r'(https?://)?t\.me/\S+', '', cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r'https?://t\.co/\S+', '', cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r'(?i)forwarded from.*', '', cleaned)
-    
-    # حذف العبارات الترويجية
-    cleaned = re.sub(r'😀?\s*اشترك\s*\|\s*دردشتنا\s*😀?', '', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'اشترك\s*في\s*(قناتنا|دردشتنا)', '', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'добавляйся\s*в\s*наш\s*чат', '', cleaned, flags=re.IGNORECASE)
-
     cleaned = re.sub(r'\n{3,}', '\n\n', cleaned).strip()
     return cleaned
 
 def contains_click_here_phrase(text): return bool(re.search(r'اضغط\s*هنا.{0,15}(للمشاهدة|لمشاهدة|مشاهدة)', text)) if text else False
 
-# 🛡️ الفلتر البرمجي القاسي (أضفت كلمات تخص المنشور الذي أرسلته)
 def is_hardcoded_ad(text):
     if not text: return False
-    ad_keywords = [
-        r"راسل\s+المعرف", r"@IQED3", r"للحجز", r"للطلب", r"للتواصل",
-        r"سعر", r"دينار", r"خصم", r"اشتراك", r"ملخصات\s+ذهبية",
-        r"реклама", r"промокод", r"скидка", r"купить", r"цена", r"руб",
-        # كلمات مخصصة لمنع منشورات الترويج لملخصات الطلبة
-        r"حسب\s*جدولنا", r"ابطال\s*2027", r"رابط\s*امتحانات", r"فاينل"
-    ]
+    ad_keywords = [r"راسل\s+المعرف", r"@IQED3", r"للحجز", r"للطلب", r"للتواصل", r"سعر", r"دينار", r"خصم", r"اشتراك", r"ملخصات\s+ذهبية", r"реклама", r"промокод", r"скидка", r"купить", r"цена", r"руб", r"حسب\s*جدولنا", r"ابطال\s*2027", r"رابط\s*امتحانات", r"فاينل"]
     for kw in ad_keywords:
-        if re.search(kw, text, re.IGNORECASE):
-            return True
+        if re.search(kw, text, re.IGNORECASE): return True
     return False
 
 def call_groq(prompt, max_retries=3):
@@ -248,6 +234,15 @@ async def apply_processing(config, text):
     except Exception as e:
         print(f"❌ خطأ المعالجة: {e}")
         return {"should_post": False, "text": ""}
+
+# دالة توليد الفوتر الذكي لفيسبوك
+def get_fb_footer(text, link):
+    if not link: return ""
+    result_keywords = [r"نتائج", r"قبول", r"أسماء", r"الدرجات", r"الامتحانات", r"كول"]
+    for kw in result_keywords:
+        if re.search(kw, text):
+            return f"\n\n📌 لمتابعة النتائج والأسماء أولاً بأول، انضموا لقناتنا على التليجرام:\n🔗 {link}"
+    return ""
 
 def _sync_post_to_facebook(page_id, token, text, media_data=None, is_video=False):
     if not page_id or not token: return
@@ -293,7 +288,6 @@ async def process_batch(source_id, messages):
     
     if contains_click_here_phrase(raw_text): return
     
-    # 1. الفلتر البرمجي (يمنع المنشور الذي أرسلته فوراً)
     if is_hardcoded_ad(raw_text):
         print(f"⏭️ تجاهل إعلان تجاري (فلتر برمجي) — {config['name']}")
         return
@@ -306,7 +300,6 @@ async def process_batch(source_id, messages):
     
     if is_duplicate_content(source_id, cleaned): return
     
-    # 2. فحص الذكاء الاصطناعي
     res = await apply_processing(config, cleaned)
     should_post = res.get("should_post", True)
     final_text = res.get("text", cleaned)
@@ -334,15 +327,17 @@ async def process_batch(source_id, messages):
 
     if not final_text.strip() and not media_data: return
 
+    # النشر على فيسبوك
     if config.get("fb_token") and config.get("fb_page_id"):
-        await post_to_facebook(config["fb_page_id"], config["fb_token"], final_text, media_data, is_video)
+        # إضافة الفوتر الذكي لفيسبوك فقط
+        fb_text = final_text + get_fb_footer(final_text, config.get("link"))
+        await post_to_facebook(config["fb_page_id"], config["fb_token"], fb_text, media_data, is_video)
 
 async def catch_up_channel(source_id):
     config = CHANNELS.get(source_id, {})
     entity_ref = config.get("source_username") or source_id
     
     if TEST_MODE:
-        print(f"🧪 وضع التجربة مفعل: جاري جلب آخر 5 منشورات لـ {config['name']}")
         messages = await client.get_messages(entity_ref, limit=5)
     else:
         last_id = state.get(str(source_id), 0)
@@ -374,13 +369,10 @@ async def catch_up_channel(source_id):
 async def main():
     print("🚀 بدء التشغيل...")
     await client.start()
-    
     tasks = []
     for source_id in CHANNELS:
         tasks.append(catch_up_channel(source_id))
-        
     await asyncio.gather(*tasks)
-        
     await client.disconnect()
     commit_state()
     print("✅ انتهت التشغيلة.")
