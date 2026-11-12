@@ -16,6 +16,7 @@ STATE_FILE = "relay_state.json"
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
+# تأكد أنها False لكي يعمل بشكل طبيعي
 TEST_MODE = False 
 
 FB_TOKEN_KIRKUK = os.getenv("FB_TOKEN_KIRKUK")
@@ -32,10 +33,12 @@ CHANNELS = {
         "source_username": "@kirkukdiary",
         "fb_page_id": PAGE_ID_KIRKUK, 
         "fb_token": FB_TOKEN_KIRKUK,
-        "prompt": """أنت محرر صحفي عراقي. أعد صياغة النص بأسلوب صحفي. 
-- انشر الأخبار المحلية والعامة فقط.
-- **ممنوع النشر (اجعل should_post=false) لأي إعلان تجاري، بيع، اشتراك، طلب مراسلة معرف، أو عروض أسعار.**
-- إذا كان النص طويلاً جداً وبلا فائدة، قم باختصاره.
+        "prompt": """أنت محرر. أعد ترتيب النص التالي ليكون مقروءاً. 
+- **ممنوع إضافة أي معلومة من عندك أو تغيير المعنى.**
+- حافظ على الأرقام والأسماء كما هي تماماً.
+- إعادة الصياغة يجب أن تكون بسيطة جداً (فقط ترتيب وتنسيق).
+- انشر أي خبر محلي أو عام (اجعل should_post=true). 
+- اجعل should_post=false فقط إذا كان إعلاناً تجارياً صريحاً (بيع منتجات، عروض أسعار).
 - لا تذكر اسم قناة المصدر أو روابطها نهائياً."""
     },
     -1009001073232: {
@@ -43,10 +46,12 @@ CHANNELS = {
         "source_username": "@RN24_IQ",
         "fb_page_id": PAGE_ID_IRAQ, 
         "fb_token": FB_TOKEN_IRAQ,
-        "prompt": """أنت محرر صحفي عراقي. أعد صياغة النص بأسلوب صحفي.
-- انشر الأخبار السياسية، الاقتصادية، أو العامة فقط.
-- **ممنوع النشر (اجعل should_post=false) لأي إعلان تجاري، بيع، اشتراك، طلب مراسلة معرف، أو عروض أسعار.**
-- إذا كان النص طويلاً جداً، قم باختصاره بدون حذف المعلومات المهمة.
+        "prompt": """أنت محرر. أعد ترتيب النص التالي ليكون مقروءاً.
+- **ممنوع إضافة أي معلومة من عندك أو تغيير المعنى.**
+- حافظ على الأرقام والأسماء كما هي تماماً.
+- إعادة الصياغة يجب أن تكون بسيطة جداً (فقط ترتيب وتنسيق).
+- انشر أي خبر سياسي أو اقتصادي أو عام (اجعل should_post=true).
+- اجعل should_post=false فقط إذا كان إعلاناً تجارياً صريحاً.
 - لا تذكر اسم قناة المصدر أو روابطها نهائياً."""
     },
     -1001530089992: {
@@ -54,10 +59,12 @@ CHANNELS = {
         "source_username": "@eduiq23",
         "fb_page_id": PAGE_ID_STUDENT, 
         "fb_token": FB_TOKEN_STUDENT,
-        "prompt": """أنت محرر لقناة تعليمية (مكتبة الطالب). 
-- انشر الأخبار التربوية، التعليمية، والمنح الدراسية المجانية فقط.
-- **ممنوع النشر (اجعل should_post=false) نهائياً لأي منشور يحتوي على: (بيع ملخصات، كتب للبيع، دورات مدفوعة، طلب مراسلة معرف معين، أسعار، أو عروض).**
-- أعد صياغة النص بشكل واضح ومختصر.
+        "prompt": """أنت محرر لقناة تعليمية. أعد ترتيب النص التالي ليكون مقروءاً.
+- **ممنوع إضافة أي معلومة من عندك أو تغيير المعنى.**
+- حافظ على الأرقام والأسماء كما هي تماماً.
+- إعادة الصياغة يجب أن تكون بسيطة جداً (فقط ترتيب وتنسيق).
+- انشر الأخبار التربوية والتعليمية فقط.
+- **ممنوع النشر نهائياً لأي إعلان تجاري أو بيع ملخصات أو طلب مراسلة معرف.**
 - لا تذكر اسم قناة المصدر أو روابطها نهائياً."""
     },
 }
@@ -166,6 +173,7 @@ def clean_text(text, source_username=None):
 
 def contains_click_here_phrase(text): return bool(re.search(r'اضغط\s*هنا.{0,15}(للمشاهدة|لمشاهدة|مشاهدة)', text)) if text else False
 
+# 🛡️ فلتر برمجي صارم (لن يمر أي إعلان حتى لو حاول الذكاء الاصطناعي قبوله)
 def is_hardcoded_ad(text):
     if not text: return False
     ad_keywords = [
@@ -200,7 +208,7 @@ async def apply_processing(config, text):
     
     full_prompt = f"""{custom_prompt}
 
-النص المراد معالجته:
+النص الأصلي (قم فقط بترتيبه دون إضافة أي معلومة):
 {text}
 
 أعد النتيجة بصيغة JSON فقط: {{"should_post": true/false, "text": "النص المعالج"}}"""
@@ -215,14 +223,13 @@ async def apply_processing(config, text):
         print(f"❌ خطأ المعالجة: {e}")
         return {"should_post": False, "text": ""}
 
-# 🚀 تسريع الرفع: استخدام دالة متزامنة ولكن نستدعيها بطريقة لا توقف باقي القنوات
 def _sync_post_to_facebook(page_id, token, text, media_data=None, is_video=False):
     if not page_id or not token: return
     try:
         base_url = f"{GRAPH}/{page_id}"
         if media_data:
             if is_video:
-                res = requests.post(f"{base_url}/videos", data={"access_token": token, "description": text}, files={"source": ("video.mp4", media_data)}, timeout=90) # تقليل الوقت
+                res = requests.post(f"{base_url}/videos", data={"access_token": token, "description": text}, files={"source": ("video.mp4", media_data)}, timeout=90)
             else:
                 res = requests.post(f"{base_url}/photos", data={"access_token": token, "message": text}, files={"source": ("image.jpg", media_data)}, timeout=45)
         else:
@@ -247,7 +254,6 @@ def _sync_post_to_facebook(page_id, token, text, media_data=None, is_video=False
         print(f"❌ فشل النشر على فيسبوك: {e}")
 
 async def post_to_facebook(page_id, token, text, media_data=None, is_video=False):
-    # 🚀 استخدام asyncio.to_thread لمنع إيقاف باقي القنوات أثناء الرفع
     await asyncio.to_thread(_sync_post_to_facebook, page_id, token, text, media_data, is_video)
 
 async def process_batch(source_id, messages):
