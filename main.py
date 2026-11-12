@@ -42,16 +42,17 @@ CHANNELS = {
 - اجعل should_post=false فقط إذا كان إعلاناً تجارياً صريحاً.
 - لا تذكر اسم قناة المصدر أو روابطها نهائياً."""
     },
-    # 👇 تم تغيير المصدر إلى @IRAQ2TV وتحديث التعليمات لتصبح مشوقة بدون زيادة
+    # 👇 تحديث قناة العراق الآن (المصدر + التعليمات الصارمة)
     -1009001073232: {
         "name": "العراق الآن", "target": None,
         "source_username": "@IRAQ2TV", # 👈 المصدر الجديد
         "fb_page_id": PAGE_ID_IRAQ, 
         "fb_token": FB_TOKEN_IRAQ,
         "link": "https://t.me/IQNowNews",
-        "prompt": """أنت محرر صحفي عراقي. أعد صياغة النص التالي ليكون جذاباً ومشوقاً للقراءة.
-- **تحذير هام جداً:** ممنوع منعاً باتاً إضافة أي معلومة، رقم، اسم، أو تفاصيل غير موجودة في النص الأصلي. مهمتك فقط إعادة ترتيب الكلمات الموجودة وجعلها مشوقة.
+        "prompt": """أنت محرر صحفي عراقي. أعد صياغة النص التالي ليكون مشوقاً وجذاباً للقراءة.
+- **تحذير صارم جداً:** ممنوع منعاً باتاً إضافة أي معلومة، رقم، اسم، أو تفاصيل غير موجودة في النص الأصلي. مهمتك فقط إعادة ترتيب الكلمات الموجودة وجعلها مشوقة.
 - حافظ على الأرقام والأسماء كما هي تماماً.
+- **ممنوع ذكر اسم "واحد العراق" أو أي اسم قناة أخرى.**
 - انشر أي خبر سياسي أو اقتصادي أو عام (اجعل should_post=true).
 - اجعل should_post=false فقط إذا كان إعلاناً تجارياً صريحاً.
 - لا تذكر اسم قناة المصدر أو روابطها نهائياً."""
@@ -178,10 +179,16 @@ def extract_hidden_link_urls(message, source_username=None):
     except Exception: pass
     return urls
 
+# 🛠️ تحديث دالة التنظيف لحذف اسم المصدر "واحد العراق"
 def clean_text(text, source_username=None):
     if not text: return ""
     cleaned = text.replace('📊', '')
-    if source_username: cleaned = re.sub(re.escape(source_username), '', cleaned, flags=re.IGNORECASE)
+    if source_username: 
+        cleaned = re.sub(re.escape(source_username), '', cleaned, flags=re.IGNORECASE)
+    
+    # حذف اسم المصدر
+    cleaned = re.sub(r'واحد\s*العراق', '', cleaned, flags=re.IGNORECASE)
+    
     cleaned = re.sub(r'(https?://)?t\.me/\S+', '', cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r'https?://t\.co/\S+', '', cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r'(?i)forwarded from.*', '', cleaned)
