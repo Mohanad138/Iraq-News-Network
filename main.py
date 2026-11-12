@@ -16,16 +16,18 @@ STATE_FILE = "relay_state.json"
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# تأكد أنها False لكي يعمل بشكل طبيعي
 TEST_MODE = False 
 
+# إعدادات فيسبوك
 FB_TOKEN_KIRKUK = os.getenv("FB_TOKEN_KIRKUK")
 FB_TOKEN_IRAQ = os.getenv("FB_TOKEN_IRAQ")
 FB_TOKEN_STUDENT = os.getenv("FB_TOKEN_STUDENT")
+FB_TOKEN_GTA = os.getenv("FB_TOKEN_GTA") # 👈 سر جديد لـ GTA
 
 PAGE_ID_KIRKUK = os.getenv("PAGE_ID_KIRKUK")
 PAGE_ID_STUDENT = os.getenv("PAGE_ID_STUDENT")
 PAGE_ID_IRAQ = os.getenv("PAGE_ID_IRAQ")
+PAGE_ID_GTA = os.getenv("PAGE_ID_GTA") # 👈 سر جديد لـ GTA
 
 CHANNELS = {
     -1001565832101: {
@@ -33,12 +35,11 @@ CHANNELS = {
         "source_username": "@kirkukdiary",
         "fb_page_id": PAGE_ID_KIRKUK, 
         "fb_token": FB_TOKEN_KIRKUK,
-        "prompt": """أنت محرر. أعد ترتيب النص التالي ليكون مقروءاً. 
-- **ممنوع إضافة أي معلومة من عندك أو تغيير المعنى.**
+        "prompt": """أنت محرر صحفي عراقي. أعد ترتيب النص التالي ليكون مقروءاً. 
+- ممنوع إضافة أي معلومة من عندك أو تغيير المعنى.
 - حافظ على الأرقام والأسماء كما هي تماماً.
-- إعادة الصياغة يجب أن تكون بسيطة جداً (فقط ترتيب وتنسيق).
 - انشر أي خبر محلي أو عام (اجعل should_post=true). 
-- اجعل should_post=false فقط إذا كان إعلاناً تجارياً صريحاً (بيع منتجات، عروض أسعار).
+- اجعل should_post=false فقط إذا كان إعلاناً تجارياً صريحاً.
 - لا تذكر اسم قناة المصدر أو روابطها نهائياً."""
     },
     -1009001073232: {
@@ -46,10 +47,9 @@ CHANNELS = {
         "source_username": "@RN24_IQ",
         "fb_page_id": PAGE_ID_IRAQ, 
         "fb_token": FB_TOKEN_IRAQ,
-        "prompt": """أنت محرر. أعد ترتيب النص التالي ليكون مقروءاً.
-- **ممنوع إضافة أي معلومة من عندك أو تغيير المعنى.**
+        "prompt": """أنت محرر صحفي عراقي. أعد ترتيب النص التالي ليكون مقروءاً.
+- ممنوع إضافة أي معلومة من عندك أو تغيير المعنى.
 - حافظ على الأرقام والأسماء كما هي تماماً.
-- إعادة الصياغة يجب أن تكون بسيطة جداً (فقط ترتيب وتنسيق).
 - انشر أي خبر سياسي أو اقتصادي أو عام (اجعل should_post=true).
 - اجعل should_post=false فقط إذا كان إعلاناً تجارياً صريحاً.
 - لا تذكر اسم قناة المصدر أو روابطها نهائياً."""
@@ -60,13 +60,28 @@ CHANNELS = {
         "fb_page_id": PAGE_ID_STUDENT, 
         "fb_token": FB_TOKEN_STUDENT,
         "prompt": """أنت محرر لقناة تعليمية. أعد ترتيب النص التالي ليكون مقروءاً.
-- **ممنوع إضافة أي معلومة من عندك أو تغيير المعنى.**
+- ممنوع إضافة أي معلومة من عندك أو تغيير المعنى.
 - حافظ على الأرقام والأسماء كما هي تماماً.
-- إعادة الصياغة يجب أن تكون بسيطة جداً (فقط ترتيب وتنسيق).
 - انشر الأخبار التربوية والتعليمية فقط.
-- **ممنوع النشر نهائياً لأي إعلان تجاري أو بيع ملخصات أو طلب مراسلة معرف.**
+- ممنوع النشر نهائياً لأي إعلان تجاري أو بيع ملخصات.
 - لا تذكر اسم قناة المصدر أو روابطها نهائياً."""
     },
+    # 👇 قناة GTA 6 (الآن تنشر على فيسبوك + تعليق التلكرام)
+    -1009003946451: {
+        "name": "تسريبات GTA 6", 
+        "target": None, # تم إيقاف النشر على تيليجرام لأنه سينشر على فيسبوك
+        "source_username": "@gta6deluxe",
+        "add_link": True, "link": "@GTA6AR",
+        "fb_page_id": PAGE_ID_GTA, 
+        "fb_token": FB_TOKEN_GTA,
+        "prompt": """أنت محرر لقناة عربية متخصصة في أخبار وتسريبات لعبة GTA 6.
+- ترجم النص إلى العربية بأسلوب طبيعي جداً كأن شخصاً عربياً كتب الخبر.
+- إذا ورد أي مبلغ بالعملة الروسية (الروبل)، قم بتحويله إلى الدولار الأمريكي (1 دولار ≈ 82.8 روبل) واكتب السعر بالدولار مع كلمة "حوالي" للتقريب.
+- احتفظ بالأرقام والأسماء كما هي.
+- لا تذكر اسم قناة المصدر أو روابطها نهائياً.
+- احذف أي عبارات ترويجية أو دعائية تخص قناة المصدر.
+- إذا كان النص إعلاناً تجارياً صريحاً اجعل should_post=false."""
+    }
 }
 
 client = TelegramClient(StringSession(TG_SESSION), TG_API_ID, TG_API_HASH)
@@ -168,17 +183,23 @@ def clean_text(text, source_username=None):
     cleaned = re.sub(r'(https?://)?t\.me/\S+', '', cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r'https?://t\.co/\S+', '', cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r'(?i)forwarded from.*', '', cleaned)
+    
+    # حذف العبارات الترويجية لقناة GTA
+    cleaned = re.sub(r'😀?\s*اشترك\s*\|\s*دردشتنا\s*😀?', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'اشترك\s*في\s*(قناتنا|دردشتنا)', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'добавляйся\s*в\s*наш\s*чат', '', cleaned, flags=re.IGNORECASE)
+
     cleaned = re.sub(r'\n{3,}', '\n\n', cleaned).strip()
     return cleaned
 
 def contains_click_here_phrase(text): return bool(re.search(r'اضغط\s*هنا.{0,15}(للمشاهدة|لمشاهدة|مشاهدة)', text)) if text else False
 
-# 🛡️ فلتر برمجي صارم (لن يمر أي إعلان حتى لو حاول الذكاء الاصطناعي قبوله)
 def is_hardcoded_ad(text):
     if not text: return False
     ad_keywords = [
         r"راسل\s+المعرف", r"@IQED3", r"للحجز", r"للطلب", r"للتواصل",
-        r"سعر", r"دينار", r"خصم", r"اشتراك", r"ملخصات\s+ذهبية"
+        r"سعر", r"دينار", r"خصم", r"اشتراك", r"ملخصات\s+ذهبية",
+        r"реклама", r"промокод", r"скидка", r"купить", r"цена", r"руб"
     ]
     for kw in ad_keywords:
         if re.search(kw, text, re.IGNORECASE):
@@ -208,7 +229,7 @@ async def apply_processing(config, text):
     
     full_prompt = f"""{custom_prompt}
 
-النص الأصلي (قم فقط بترتيبه دون إضافة أي معلومة):
+النص المراد معالجته:
 {text}
 
 أعد النتيجة بصيغة JSON فقط: {{"should_post": true/false, "text": "النص المعالج"}}"""
@@ -223,17 +244,21 @@ async def apply_processing(config, text):
         print(f"❌ خطأ المعالجة: {e}")
         return {"should_post": False, "text": ""}
 
+# 🚀 دالة الرفع لفيسبوك (تتعامل مع النصوص والفيديوهات والصور)
 def _sync_post_to_facebook(page_id, token, text, media_data=None, is_video=False):
     if not page_id or not token: return
     try:
         base_url = f"{GRAPH}/{page_id}"
         if media_data:
             if is_video:
-                res = requests.post(f"{base_url}/videos", data={"access_token": token, "description": text}, files={"source": ("video.mp4", media_data)}, timeout=90)
+                print(f"📤 جاري رفع فيديو إلى فيسبوك...")
+                res = requests.post(f"{base_url}/videos", data={"access_token": token, "description": text}, files={"source": ("video.mp4", media_data)}, timeout=120)
             else:
-                res = requests.post(f"{base_url}/photos", data={"access_token": token, "message": text}, files={"source": ("image.jpg", media_data)}, timeout=45)
+                print(f"📤 جاري رفع صورة إلى فيسبوك...")
+                res = requests.post(f"{base_url}/photos", data={"access_token": token, "message": text}, files={"source": ("image.jpg", media_data)}, timeout=60)
         else:
-            res = requests.post(f"{base_url}/feed", data={"access_token": token, "message": text}, timeout=20)
+            print(f"📤 جاري رفع نص إلى فيسبوك...")
+            res = requests.post(f"{base_url}/feed", data={"access_token": token, "message": text}, timeout=30)
         
         res_data = res.json()
         if "error" in res_data:
@@ -243,13 +268,16 @@ def _sync_post_to_facebook(page_id, token, text, media_data=None, is_video=False
         post_id = res_data.get("post_id") or res_data.get("id")
         print(f"✅ نُشر على فيسبوك ({page_id})")
         
+        # التعليقات التلقائية
         comment_text = ""
         if page_id == PAGE_ID_KIRKUK: comment_text = "تابعنا على التلكرام 👇\nhttps://t.me/KirkukNow24H"
         elif page_id == PAGE_ID_IRAQ: comment_text = "تابعنا على التلكرام 👇\nhttps://t.me/IQNowNews"
         elif page_id == PAGE_ID_STUDENT: comment_text = "تابعنا على التلكرام 👇\nhttps://t.me/TalibLib"
+        elif page_id == PAGE_ID_GTA: comment_text = "تابعونا على التلكرام 👇\nhttps://t.me/GTA6AR" # 👈 تعليق GTA
         
         if comment_text:
             requests.post(f"{GRAPH}/{post_id}/comments", data={"access_token": token, "message": comment_text}, timeout=20)
+            print(f"✅ تمت إضافة تعليق التلكرام.")
     except Exception as e:
         print(f"❌ فشل النشر على فيسبوك: {e}")
 
@@ -304,6 +332,7 @@ async def process_batch(source_id, messages):
 
     if not final_text.strip() and not media_data: return
 
+    # النشر على فيسبوك
     if config.get("fb_token") and config.get("fb_page_id"):
         await post_to_facebook(config["fb_page_id"], config["fb_token"], final_text, media_data, is_video)
 
@@ -312,6 +341,7 @@ async def catch_up_channel(source_id):
     entity_ref = config.get("source_username") or source_id
     
     if TEST_MODE:
+        print(f"🧪 وضع التجربة مفعل: جاري جلب آخر 5 منشورات لـ {config['name']}")
         messages = await client.get_messages(entity_ref, limit=5)
     else:
         last_id = state.get(str(source_id), 0)
@@ -341,13 +371,19 @@ async def catch_up_channel(source_id):
         state[str(source_id)] = new_last
 
 async def main():
+    print("🚀 بدء التشغيل...")
     await client.start()
+    
+    # 🚀 تشغيل كل القنوات في نفس الوقت (توازي)
     tasks = []
     for source_id in CHANNELS:
         tasks.append(catch_up_channel(source_id))
+        
     await asyncio.gather(*tasks)
+        
     await client.disconnect()
     commit_state()
+    print("✅ انتهت التشغيلة.")
 
 if __name__ == "__main__":
     asyncio.run(main())
